@@ -1,0 +1,165 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           Int      @id @default(autoincrement())
+  name         String
+  email        String   @unique
+  phone        String?  @unique
+  passwordHash    String
+  role            String   @default("SUPPORTER") // "ATHLETE", "SUPPORTER", "SPONSOR", "ADMIN"
+  status          String   @default("ACTIVE")
+  profileImageUrl String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  athleteProfile AthleteProfile?
+  sponsorProfile SponsorProfile?
+  supports       Support[]
+}
+
+model AthleteProfile {
+  id                        Int      @id @default(autoincrement())
+  userId                    Int      @unique
+  user                      User     @relation(fields: [userId], references: [id])
+  sportId                   Int?
+  sport                     Sport?   @relation(fields: [sportId], references: [id])
+  discipline                String?
+  city                      String?
+  state                     String?
+  bio                       String?
+  coachName                 String?
+  academyName               String?
+  currentGoal               String?
+  publicVerificationSummary String?
+  createdAt                 DateTime @default(now())
+  updatedAt                 DateTime @updatedAt
+
+  achievements         Achievement[]
+  supportRequests      SupportRequest[]
+  sponsorshipInterests SponsorshipInterest[]
+}
+
+model SponsorProfile {
+  id               Int      @id @default(autoincrement())
+  userId           Int      @unique
+  user             User     @relation(fields: [userId], references: [id])
+  organizationName String
+  organizationType String?
+  contactPerson    String?
+  preferredSports  String?
+  preferredRegions String?
+  budgetRange      String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  sponsorshipInterests SponsorshipInterest[]
+}
+
+model Sport {
+  id       Int      @id @default(autoincrement())
+  name     String   @unique
+  category String?
+
+  athletes AthleteProfile[]
+}
+
+model Achievement {
+  id                 Int            @id @default(autoincrement())
+  athleteId          Int
+  athlete            AthleteProfile @relation(fields: [athleteId], references: [id])
+  title              String
+  competition        String?
+  event              String?
+  position           String?
+  score              String?
+  date               String?
+  evidenceFileId     String?
+  verificationStatus String         @default("NOT_SUBMITTED")
+  verifiedBy         Int?
+  verifiedAt         DateTime?
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
+}
+
+model SupportRequest {
+  id              Int            @id @default(autoincrement())
+  athleteId       Int
+  athlete         AthleteProfile @relation(fields: [athleteId], references: [id])
+  title           String
+  description     String?
+  category        String
+  targetAmount    Float
+  deadline        DateTime?
+  approvalStatus  String         @default("DRAFT") // DRAFT, SUBMITTED, UNDER_REVIEW, APPROVED, REJECTED
+  lifecycleStatus String         @default("ACTIVE") // ACTIVE, TARGET_REACHED, FULFILLED, CLOSED
+  amountSupported Float          @default(0)
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  budgetItems     BudgetItem[]
+  supports        Support[]
+  progressUpdates ProgressUpdate[]
+}
+
+model BudgetItem {
+  id               Int            @id @default(autoincrement())
+  supportRequestId Int
+  supportRequest   SupportRequest @relation(fields: [supportRequestId], references: [id])
+  description      String
+  amount           Float
+  evidenceFileId   String?
+  status           String         @default("PENDING")
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+}
+
+model Support {
+  id               Int            @id @default(autoincrement())
+  supportRequestId Int
+  supportRequest   SupportRequest @relation(fields: [supportRequestId], references: [id])
+  supporterId      Int
+  supporter        User           @relation(fields: [supporterId], references: [id])
+  amount           Float
+  transactionId    String?
+  status           String         @default("INITIATED") // INITIATED, PENDING, SUCCESS, FAILED
+  createdAt        DateTime       @default(now())
+}
+
+model ProgressUpdate {
+  id                 Int            @id @default(autoincrement())
+  supportRequestId   Int
+  supportRequest     SupportRequest @relation(fields: [supportRequestId], references: [id])
+  title              String
+  description        String?
+  evidenceFileId     String?
+  verificationStatus String         @default("NOT_SUBMITTED")
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
+}
+
+model SponsorshipInterest {
+  id               Int            @id @default(autoincrement())
+  sponsorId        Int
+  sponsor          SponsorProfile @relation(fields: [sponsorId], references: [id])
+  athleteId        Int
+  athlete          AthleteProfile @relation(fields: [athleteId], references: [id])
+  supportRequestId Int?
+  supportType      String
+  proposedAmount   String?
+  duration         String?
+  requirements     String?
+  message          String?
+  status           String         @default("SUBMITTED")
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+}
