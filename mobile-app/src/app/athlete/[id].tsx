@@ -1,9 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Image } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Image, SafeAreaView } from 'react-native';
 import { useLocalSearchParams, router } from 'expo-router';
 import axios from 'axios';
+import { API_URL } from '../../utils/config';
 
-const API_URL = 'http://localhost:5000/api';
 const PRIMARY = '#E2550B';
 const BG = '#F9FAFB';
 const CARD_BG = '#FFFFFF';
@@ -29,7 +29,7 @@ export default function AthleteProfileScreen() {
       const res = await axios.get(`${API_URL}/athletes/${id}`);
       setAthlete(res.data);
     } catch (err) {
-      console.error(err);
+      console.error('Athlete detail error:', err);
     }
     setLoading(false);
   };
@@ -47,12 +47,12 @@ export default function AthleteProfileScreen() {
   }
 
   const activeRequest = athlete.supportRequests?.find((r: any) => r.lifecycleStatus === 'ACTIVE');
-  const imageUrl = athlete.user.profileImageUrl || 'https://images.unsplash.com/photo-1552667466-07770ae110d0?ixlib=rb-1.2.1&auto=format&fit=crop&w=800&q=80';
+  const imageUrl = athlete.user?.profileImageUrl || 'https://images.unsplash.com/photo-1552667466-07770ae110d0?ixlib=rb-1.2.1&auto=format&fit=crop&w=800&q=80';
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 80 }}>
+    <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 60 }} showsVerticalScrollIndicator={false}>
       
-      {/* Hero Image */}
+      {/* Cover/Profile Image */}
       <Image source={{ uri: imageUrl }} style={styles.coverImage} />
       
       <View style={styles.contentWrapper}>
@@ -116,71 +116,71 @@ export default function AthleteProfileScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: BG },
   center: { flex: 1, backgroundColor: BG, justifyContent: 'center', alignItems: 'center' },
-  contentWrapper: { flex: 1, width: '100%', maxWidth: 800, alignSelf: 'center' },
+  contentWrapper: { flex: 1, width: '100%', maxWidth: 540, alignSelf: 'center' },
   
-  coverImage: { width: '100%', height: 350 },
+  coverImage: { width: '100%', height: 280, backgroundColor: '#E5E7EB' },
   
   content: {
-    padding: 32,
-    marginTop: -40,
+    padding: 20,
+    marginTop: -24,
     backgroundColor: CARD_BG,
-    borderTopLeftRadius: 32,
-    borderTopRightRadius: 32,
-    shadowColor: '#000', shadowOffset: { width: 0, height: -10 }, shadowOpacity: 0.05, shadowRadius: 20, elevation: 5,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    shadowColor: '#000', shadowOffset: { width: 0, height: -6 }, shadowOpacity: 0.05, shadowRadius: 12, elevation: 4,
   },
   
-  name: { fontSize: 36, fontWeight: '900', color: TEXT_MAIN, letterSpacing: -1 },
-  sport: { fontSize: 18, color: PRIMARY, fontWeight: '800', marginTop: 8 },
-  location: { fontSize: 15, color: TEXT_FAINT, marginTop: 4, fontWeight: '500' },
+  name: { fontSize: 26, fontWeight: '900', color: TEXT_MAIN, letterSpacing: -0.5 },
+  sport: { fontSize: 16, color: PRIMARY, fontWeight: '800', marginTop: 4 },
+  location: { fontSize: 13, color: TEXT_FAINT, marginTop: 2, fontWeight: '500' },
   
-  section: { marginTop: 32 },
-  sectionTitle: { fontSize: 22, fontWeight: '900', color: TEXT_MAIN, marginBottom: 16 },
-  text: { color: TEXT_DIM, lineHeight: 26, fontSize: 16 },
+  section: { marginTop: 24 },
+  sectionTitle: { fontSize: 18, fontWeight: '900', color: TEXT_MAIN, marginBottom: 10 },
+  text: { color: TEXT_DIM, lineHeight: 22, fontSize: 14.5 },
   
   achievementCard: {
     backgroundColor: BG,
-    padding: 20,
-    borderRadius: 16,
-    marginBottom: 12,
+    padding: 14,
+    borderRadius: 12,
+    marginBottom: 10,
     borderWidth: 1,
     borderColor: BORDER,
   },
-  achTitle: { color: TEXT_MAIN, fontWeight: '800', fontSize: 16 },
-  achDetails: { color: TEXT_DIM, marginTop: 4, fontSize: 14 },
-  verifiedText: { color: '#059669', fontSize: 12, fontWeight: '800', marginTop: 10 },
+  achTitle: { color: TEXT_MAIN, fontWeight: '800', fontSize: 14.5 },
+  achDetails: { color: TEXT_DIM, marginTop: 3, fontSize: 13 },
+  verifiedText: { color: '#059669', fontSize: 11, fontWeight: '800', marginTop: 6 },
   
   supportSection: {
-    marginTop: 40,
-    backgroundColor: '#FFF7ED', // very light orange
-    padding: 24,
-    borderRadius: 24,
+    marginTop: 28,
+    backgroundColor: '#FFF7ED',
+    padding: 18,
+    borderRadius: 16,
     borderWidth: 1,
     borderColor: '#FFEDD5',
   },
-  supportTitle: { color: PRIMARY, fontWeight: '900', textTransform: 'uppercase', letterSpacing: 1.5, fontSize: 12, marginBottom: 12 },
-  supportGoal: { color: TEXT_MAIN, fontSize: 24, fontWeight: '900', marginBottom: 12 },
+  supportTitle: { color: PRIMARY, fontWeight: '900', textTransform: 'uppercase', letterSpacing: 1.2, fontSize: 11, marginBottom: 8 },
+  supportGoal: { color: TEXT_MAIN, fontSize: 18, fontWeight: '900', marginBottom: 8 },
   
   budgetList: {
-    marginTop: 20,
+    marginTop: 14,
     backgroundColor: CARD_BG,
-    padding: 20,
-    borderRadius: 16,
+    padding: 14,
+    borderRadius: 12,
     borderWidth: 1, borderColor: '#FFEDD5',
   },
-  budgetItemRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#F3F4F6' },
-  budgetItemDesc: { color: TEXT_DIM, fontSize: 14 },
-  budgetItemAmt: { color: TEXT_MAIN, fontWeight: '800', fontSize: 14 },
+  budgetItemRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: '#F3F4F6' },
+  budgetItemDesc: { color: TEXT_DIM, fontSize: 13 },
+  budgetItemAmt: { color: TEXT_MAIN, fontWeight: '800', fontSize: 13 },
   
-  progressRow: { marginTop: 24, alignItems: 'center' },
-  progressText: { color: '#059669', fontWeight: '900', fontSize: 18 },
+  progressRow: { marginTop: 16, alignItems: 'center' },
+  progressText: { color: '#059669', fontWeight: '900', fontSize: 15 },
   
   supportBtn: {
     backgroundColor: PRIMARY,
-    padding: 20,
-    borderRadius: 16,
+    paddingVertical: 14,
+    borderRadius: 12,
     alignItems: 'center',
-    marginTop: 24,
-    shadowColor: PRIMARY, shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.3, shadowRadius: 16, elevation: 8,
+    marginTop: 16,
+    shadowColor: PRIMARY, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.25, shadowRadius: 10, elevation: 5,
   },
-  supportBtnText: { color: '#fff', fontWeight: '900', fontSize: 16, letterSpacing: 1, fontStyle: 'italic' }
+  supportBtnText: { color: '#fff', fontWeight: '900', fontSize: 14, letterSpacing: 1, fontStyle: 'italic' }
 });
