@@ -40,7 +40,7 @@ model AthleteProfile {
   coachName                 String?
   academyName               String?
   currentGoal               String?
-  publicVerificationSummary String?
+  publicVerificationSummary String? // DEPRECATED: verification now computed from Verification table. Kept for backward compat.
   createdAt                 DateTime @default(now())
   updatedAt                 DateTime @updatedAt
 
@@ -84,7 +84,8 @@ model Achievement {
   score              String?
   date               String?
   evidenceFileId     String?
-  verificationStatus String         @default("NOT_SUBMITTED")
+  achievementLevel   String?        // DISTRICT | STATE | NATIONAL | INTERNATIONAL
+  verificationStatus String         @default("NOT_SUBMITTED") // Denormalized cache from Verification table. Full enum: NOT_SUBMITTED | PENDING_REVIEW | VERIFIED | REJECTED | NEEDS_CORRECTION | RE_VERIFICATION_REQUIRED
   verifiedBy         Int?
   verifiedAt         DateTime?
   createdAt          DateTime       @default(now())
@@ -130,9 +131,11 @@ model Support {
   supporterId      Int
   supporter        User           @relation(fields: [supporterId], references: [id])
   amount           Float
-  transactionId    String?
+  transactionId    String?        // Legacy field, kept for backward compat
   status           String         @default("INITIATED") // INITIATED, PENDING, SUCCESS, FAILED
   createdAt        DateTime       @default(now())
+
+  transaction      Transaction?
 }
 
 model ProgressUpdate {
@@ -162,4 +165,48 @@ model SponsorshipInterest {
   status           String         @default("SUBMITTED")
   createdAt        DateTime       @default(now())
   updatedAt        DateTime       @updatedAt
+}
+
+// Polymorphic verification — one record per entity being verified.
+// No direct Prisma relation; resolved in application code via entityType/entityId.
+model Verification {
+  id         Int       @id @default(autoincrement())
+  entityType String    // "AthleteProfile" | "Achievement" | "SupportRequest" | "BudgetItem"
+  entityId   Int
+  category   String    // IDENTITY | ATHLETE_AFFILIATION | ACHIEVEMENT | SUPPORT_NEED | BUDGET_EVIDENCE | EXPENSE_EVIDENCE
+  status     String    @default("NOT_SUBMITTED") // NOT_SUBMITTED | PENDING_REVIEW | VERIFIED | REJECTED | NEEDS_CORRECTION | RE_VERIFICATION_REQUIRED
+  verifiedBy Int?
+  verifiedAt DateTime?
+  notes      String?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+}
+
+// Linked 1:1 to Support. Uses Razorpay vocabulary for gateway status.
+// Note: Uses gatewayOrderId/gatewayPaymentId/gatewaySignature instead of the brief's
+// single gatewayReference — intentional enhancement to match real Razorpay webhook shape.
+model Transaction {
+  id               Int      @id @default(autoincrement())
+  supportId        Int      @unique
+  support          Support  @relation(fields: [supportId], references: [id])
+  gatewayOrderId   String?  // mock: "order_XXXXXXXXXX"
+  gatewayPaymentId String?  // mock: "pay_XXXXXXXXXX"
+  gatewaySignature String?  // stub for HMAC verification
+  amount           Float
+  currency         String   @default("INR")
+  status           String   @default("CREATED") // CREATED | AUTHORIZED | CAPTURED | FAILED (Razorpay vocabulary)
+  gatewayResponse  String?  // JSON blob of full mock response
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+}
+
+// Audit trail for all admin mutations.
+model AuditLog {
+  id         Int      @id @default(autoincrement())
+  userId     Int
+  action     String   // "VERIFICATION_APPROVED", "VERIFICATION_REJECTED", "VERIFICATION_CORRECTION_REQUESTED", "SUPPORT_REQUEST_APPROVED", etc.
+  entityType String   // "Verification", "SupportRequest", "SponsorshipInterest"
+  entityId   Int
+  details    String?  // JSON with before/after or contextual notes
+  createdAt  DateTime @default(now())
 }
