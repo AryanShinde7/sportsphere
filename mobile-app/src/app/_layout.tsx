@@ -17,10 +17,20 @@ export default function Layout() {
       <Stack.Screen name="index" options={{ headerShown: false }} />
       <Stack.Screen name="dashboard" options={{ headerShown: false }} />
       <Stack.Screen
+        name="onboarding/index"
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
         name="athlete/[id]"
         options={{
           title: 'Athlete Profile',
           headerBackTitle: 'Back',
+        }}
+      />
+      <Stack.Screen
+        name="athlete/verification"
+        options={{
+          headerShown: false,
         }}
       />
       <Stack.Screen
