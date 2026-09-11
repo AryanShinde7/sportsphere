@@ -7,7 +7,11 @@ const prisma = new PrismaClient();
 async function main() {
   console.log('🌱 Seeding database with rich data...');
 
-  // Clean existing data
+  // Clean existing data (order matters for FK constraints)
+  await prisma.auditLog.deleteMany();
+  await prisma.transaction.deleteMany();
+  await prisma.verification.deleteMany();
+  await prisma.progressUpdate.deleteMany();
   await prisma.support.deleteMany();
   await prisma.budgetItem.deleteMany();
   await prisma.supportRequest.deleteMany();
@@ -37,7 +41,7 @@ async function main() {
   const passwordHash = await bcrypt.hash('password123', 10);
 
   // --- ADMIN ---
-  await prisma.user.create({
+  const admin = await prisma.user.create({
     data: { name: 'System Admin', email: 'admin@sportsphere.com', passwordHash, role: 'ADMIN' },
   });
 
@@ -258,33 +262,47 @@ async function main() {
   });
 
   // =============================================
-  // ACHIEVEMENTS
+  // ACHIEVEMENTS (with achievementLevel)
   // =============================================
   const achievementsData = [
-    { athleteId: aarav.athleteProfile.id, title: 'Maharashtra State Championship Silver', competition: 'Maharashtra State Athletics Championship', event: '400m Sprint', position: '2nd Place', score: '48.7s', date: '2025', verificationStatus: 'VERIFIED' },
-    { athleteId: aarav.athleteProfile.id, title: 'Mumbai District Gold', competition: 'Mumbai District Athletics Meet', event: '400m Sprint', position: '1st Place', score: '49.2s', date: '2024', verificationStatus: 'VERIFIED' },
-    { athleteId: diya.athleteProfile.id, title: 'Kerala State Aquatics Gold', competition: 'Kerala State Aquatics Championship', event: '200m Freestyle', position: '1st Place', score: '2:05.3', date: '2025', verificationStatus: 'VERIFIED' },
-    { athleteId: diya.athleteProfile.id, title: 'National Junior Bronze', competition: 'National Junior Aquatics Championship', event: '200m Freestyle', position: '3rd Place', score: '2:04.1', date: '2025', verificationStatus: 'VERIFIED' },
-    { athleteId: rohan.athleteProfile.id, title: 'Sonipat District Wrestling Gold', competition: 'Sonipat District Wrestling Championship', event: 'Freestyle 74kg', position: '1st Place', date: '2025', verificationStatus: 'VERIFIED' },
-    { athleteId: ananya.athleteProfile.id, title: 'Telangana State Semifinalist', competition: 'Telangana State Badminton Championship', event: 'Women\'s Singles', position: '3rd Place', date: '2025', verificationStatus: 'VERIFIED' },
-    { athleteId: ananya.athleteProfile.id, title: 'Hyderabad City Champion', competition: 'Hyderabad City Open', event: 'Women\'s Singles', position: '1st Place', date: '2024', verificationStatus: 'VERIFIED' },
-    { athleteId: vikram.athleteProfile.id, title: 'National Boxing Bronze', competition: 'National Boxing Championship', event: 'Light Welterweight 63.5kg', position: '3rd Place', date: '2025', verificationStatus: 'VERIFIED' },
-    { athleteId: vikram.athleteProfile.id, title: 'Rajasthan State Gold', competition: 'Rajasthan State Boxing Championship', event: 'Light Welterweight', position: '1st Place', date: '2024', verificationStatus: 'VERIFIED' },
-    { athleteId: meera.athleteProfile.id, title: 'MP State Shooting Silver', competition: 'MP State Shooting Championship', event: '10m Air Rifle', position: '2nd Place', score: '628.5', date: '2025', verificationStatus: 'VERIFIED' },
-    { athleteId: arjun.athleteProfile.id, title: 'NE Zone Weightlifting Gold', competition: 'North East Zone Weightlifting Championship', event: '67kg Snatch + C&J', position: '1st Place', score: '280kg Total', date: '2025', verificationStatus: 'VERIFIED' },
-    { athleteId: priyaA.athleteProfile.id, title: 'Ranchi District Archery Gold', competition: 'Ranchi District Archery Championship', event: 'Recurve Individual', position: '1st Place', score: '648/720', date: '2025', verificationStatus: 'PENDING_REVIEW' },
-    { athleteId: karan.athleteProfile.id, title: 'Gujarat State TT Champion', competition: 'Gujarat State Table Tennis Championship', event: 'Men\'s Singles', position: '1st Place', date: '2025', verificationStatus: 'VERIFIED' },
-    { athleteId: suresh.athleteProfile.id, title: 'Tamil Nadu State Kabaddi Gold', competition: 'Tamil Nadu State Kabaddi Championship', event: 'Senior Men', position: '1st Place (Team)', date: '2025', verificationStatus: 'VERIFIED' },
-    { athleteId: suresh.athleteProfile.id, title: 'Best Raider Award', competition: 'Tamil Nadu State Kabaddi Championship', event: 'Senior Men', position: 'Best Raider', date: '2025', verificationStatus: 'PENDING_REVIEW' },
+    // Aarav - Athletics
+    { athleteId: aarav.athleteProfile.id, title: 'Maharashtra State Championship Silver', competition: 'Maharashtra State Athletics Championship', event: '400m Sprint', position: '2nd Place', score: '48.7s', date: '2025', achievementLevel: 'STATE', verificationStatus: 'VERIFIED' },
+    { athleteId: aarav.athleteProfile.id, title: 'Mumbai District Gold', competition: 'Mumbai District Athletics Meet', event: '400m Sprint', position: '1st Place', score: '49.2s', date: '2024', achievementLevel: 'DISTRICT', verificationStatus: 'VERIFIED' },
+    // Diya - Swimming
+    { athleteId: diya.athleteProfile.id, title: 'Kerala State Aquatics Gold', competition: 'Kerala State Aquatics Championship', event: '200m Freestyle', position: '1st Place', score: '2:05.3', date: '2025', achievementLevel: 'STATE', verificationStatus: 'VERIFIED' },
+    { athleteId: diya.athleteProfile.id, title: 'National Junior Bronze', competition: 'National Junior Aquatics Championship', event: '200m Freestyle', position: '3rd Place', score: '2:04.1', date: '2025', achievementLevel: 'NATIONAL', verificationStatus: 'VERIFIED' },
+    // Rohan - Wrestling
+    { athleteId: rohan.athleteProfile.id, title: 'Sonipat District Wrestling Gold', competition: 'Sonipat District Wrestling Championship', event: 'Freestyle 74kg', position: '1st Place', date: '2025', achievementLevel: 'DISTRICT', verificationStatus: 'VERIFIED' },
+    // Ananya - Badminton
+    { athleteId: ananya.athleteProfile.id, title: 'Telangana State Semifinalist', competition: 'Telangana State Badminton Championship', event: 'Women\'s Singles', position: '3rd Place', date: '2025', achievementLevel: 'STATE', verificationStatus: 'VERIFIED' },
+    { athleteId: ananya.athleteProfile.id, title: 'Hyderabad City Champion', competition: 'Hyderabad City Open', event: 'Women\'s Singles', position: '1st Place', date: '2024', achievementLevel: 'DISTRICT', verificationStatus: 'VERIFIED' },
+    // Vikram - Boxing
+    { athleteId: vikram.athleteProfile.id, title: 'National Boxing Bronze', competition: 'National Boxing Championship', event: 'Light Welterweight 63.5kg', position: '3rd Place', date: '2025', achievementLevel: 'NATIONAL', verificationStatus: 'VERIFIED' },
+    { athleteId: vikram.athleteProfile.id, title: 'Rajasthan State Gold', competition: 'Rajasthan State Boxing Championship', event: 'Light Welterweight', position: '1st Place', date: '2024', achievementLevel: 'STATE', verificationStatus: 'VERIFIED' },
+    // Meera - Shooting
+    { athleteId: meera.athleteProfile.id, title: 'MP State Shooting Silver', competition: 'MP State Shooting Championship', event: '10m Air Rifle', position: '2nd Place', score: '628.5', date: '2025', achievementLevel: 'STATE', verificationStatus: 'VERIFIED' },
+    // Arjun - Weightlifting
+    { athleteId: arjun.athleteProfile.id, title: 'NE Zone Weightlifting Gold', competition: 'North East Zone Weightlifting Championship', event: '67kg Snatch + C&J', position: '1st Place', score: '280kg Total', date: '2025', achievementLevel: 'STATE', verificationStatus: 'VERIFIED' },
+    // Priya A - Archery (PENDING_REVIEW)
+    { athleteId: priyaA.athleteProfile.id, title: 'Ranchi District Archery Gold', competition: 'Ranchi District Archery Championship', event: 'Recurve Individual', position: '1st Place', score: '648/720', date: '2025', achievementLevel: 'DISTRICT', verificationStatus: 'PENDING_REVIEW' },
+    // Karan - Table Tennis
+    { athleteId: karan.athleteProfile.id, title: 'Gujarat State TT Champion', competition: 'Gujarat State Table Tennis Championship', event: 'Men\'s Singles', position: '1st Place', date: '2025', achievementLevel: 'STATE', verificationStatus: 'VERIFIED' },
+    // Suresh - Kabaddi
+    { athleteId: suresh.athleteProfile.id, title: 'Tamil Nadu State Kabaddi Gold', competition: 'Tamil Nadu State Kabaddi Championship', event: 'Senior Men', position: '1st Place (Team)', date: '2025', achievementLevel: 'STATE', verificationStatus: 'VERIFIED' },
+    { athleteId: suresh.athleteProfile.id, title: 'Best Raider Award', competition: 'Tamil Nadu State Kabaddi Championship', event: 'Senior Men', position: 'Best Raider', date: '2025', achievementLevel: 'STATE', verificationStatus: 'PENDING_REVIEW' },
   ];
+
+  // Create achievements and collect them for Verification linkage
+  const createdAchievements = [];
   for (const ach of achievementsData) {
-    await prisma.achievement.create({ data: ach });
+    const created = await prisma.achievement.create({ data: ach });
+    createdAchievements.push(created);
   }
 
   // =============================================
   // SUPPORT REQUESTS (varied categories, amounts)
   // =============================================
-  await prisma.supportRequest.create({
+  const sr1 = await prisma.supportRequest.create({
     data: {
       athleteId: aarav.athleteProfile.id,
       title: 'National Championship Travel Fund',
@@ -298,7 +316,7 @@ async function main() {
     }
   });
 
-  await prisma.supportRequest.create({
+  const sr2 = await prisma.supportRequest.create({
     data: {
       athleteId: diya.athleteProfile.id,
       title: 'High-Performance Swimsuit & Training Gear',
@@ -313,7 +331,7 @@ async function main() {
     }
   });
 
-  await prisma.supportRequest.create({
+  const sr3 = await prisma.supportRequest.create({
     data: {
       athleteId: rohan.athleteProfile.id,
       title: 'Wrestling Mat & Nutrition Support',
@@ -327,7 +345,7 @@ async function main() {
     }
   });
 
-  await prisma.supportRequest.create({
+  const sr4 = await prisma.supportRequest.create({
     data: {
       athleteId: ananya.athleteProfile.id,
       title: 'All India Junior Ranking Tournament Entry',
@@ -341,7 +359,7 @@ async function main() {
     }
   });
 
-  await prisma.supportRequest.create({
+  const sr5 = await prisma.supportRequest.create({
     data: {
       athleteId: vikram.athleteProfile.id,
       title: 'Olympic Boxing Camp Training Fee',
@@ -357,7 +375,7 @@ async function main() {
     }
   });
 
-  await prisma.supportRequest.create({
+  const sr6 = await prisma.supportRequest.create({
     data: {
       athleteId: meera.athleteProfile.id,
       title: 'Air Rifle Pellets & Range Practice',
@@ -371,7 +389,7 @@ async function main() {
     }
   });
 
-  await prisma.supportRequest.create({
+  const sr7 = await prisma.supportRequest.create({
     data: {
       athleteId: arjun.athleteProfile.id,
       title: 'National Championship Preparation',
@@ -385,7 +403,7 @@ async function main() {
     }
   });
 
-  await prisma.supportRequest.create({
+  const sr8 = await prisma.supportRequest.create({
     data: {
       athleteId: priyaA.athleteProfile.id,
       title: 'Competition Bow Upgrade',
@@ -399,7 +417,7 @@ async function main() {
     }
   });
 
-  await prisma.supportRequest.create({
+  const sr9 = await prisma.supportRequest.create({
     data: {
       athleteId: karan.athleteProfile.id,
       title: 'National Games Preparation Camp',
@@ -413,7 +431,7 @@ async function main() {
     }
   });
 
-  await prisma.supportRequest.create({
+  const sr10 = await prisma.supportRequest.create({
     data: {
       athleteId: suresh.athleteProfile.id,
       title: 'PKL Trial Preparation & Fitness',
@@ -428,7 +446,83 @@ async function main() {
     }
   });
 
-  console.log('✅ Seed completed! Created 10 athletes, 15 achievements, 10 support requests.');
+  // =============================================
+  // VERIFICATION RECORDS (Polymorphic)
+  // =============================================
+  // Helper to map athlete profiles and their verification states
+  const athleteProfiles = [
+    { profile: aarav.athleteProfile, identityStatus: 'VERIFIED', affiliationStatus: 'VERIFIED' },
+    { profile: diya.athleteProfile, identityStatus: 'VERIFIED', affiliationStatus: 'VERIFIED' },
+    { profile: rohan.athleteProfile, identityStatus: 'VERIFIED', affiliationStatus: 'NOT_SUBMITTED' },
+    { profile: ananya.athleteProfile, identityStatus: 'VERIFIED', affiliationStatus: 'VERIFIED' },
+    { profile: vikram.athleteProfile, identityStatus: 'VERIFIED', affiliationStatus: 'VERIFIED' },
+    { profile: meera.athleteProfile, identityStatus: 'VERIFIED', affiliationStatus: 'NOT_SUBMITTED' },
+    { profile: arjun.athleteProfile, identityStatus: 'VERIFIED', affiliationStatus: 'VERIFIED' },
+    { profile: priyaA.athleteProfile, identityStatus: 'VERIFIED', affiliationStatus: 'NOT_SUBMITTED' },
+    { profile: karan.athleteProfile, identityStatus: 'VERIFIED', affiliationStatus: 'NOT_SUBMITTED' },
+    { profile: suresh.athleteProfile, identityStatus: 'PENDING_REVIEW', affiliationStatus: 'PENDING_REVIEW' },
+  ];
+
+  // Seed IDENTITY + ATHLETE_AFFILIATION per athlete
+  for (const ap of athleteProfiles) {
+    await prisma.verification.create({
+      data: {
+        entityType: 'AthleteProfile',
+        entityId: ap.profile.id,
+        category: 'IDENTITY',
+        status: ap.identityStatus,
+        verifiedBy: ap.identityStatus === 'VERIFIED' ? admin.id : null,
+        verifiedAt: ap.identityStatus === 'VERIFIED' ? new Date() : null,
+      }
+    });
+    await prisma.verification.create({
+      data: {
+        entityType: 'AthleteProfile',
+        entityId: ap.profile.id,
+        category: 'ATHLETE_AFFILIATION',
+        status: ap.affiliationStatus,
+        verifiedBy: ap.affiliationStatus === 'VERIFIED' ? admin.id : null,
+        verifiedAt: ap.affiliationStatus === 'VERIFIED' ? new Date() : null,
+      }
+    });
+  }
+
+  // Seed ACHIEVEMENT verification per achievement (mirrors Achievement.verificationStatus)
+  for (const ach of createdAchievements) {
+    await prisma.verification.create({
+      data: {
+        entityType: 'Achievement',
+        entityId: ach.id,
+        category: 'ACHIEVEMENT',
+        status: ach.verificationStatus,
+        verifiedBy: ach.verificationStatus === 'VERIFIED' ? admin.id : null,
+        verifiedAt: ach.verificationStatus === 'VERIFIED' ? new Date() : null,
+      }
+    });
+  }
+
+  // Seed SUPPORT_NEED verification per support request
+  const supportRequests = [sr1, sr2, sr3, sr4, sr5, sr6, sr7, sr8, sr9, sr10];
+  for (let i = 0; i < supportRequests.length; i++) {
+    const sr = supportRequests[i];
+    // Most are VERIFIED since they're already APPROVED; last two are PENDING_REVIEW for admin queue
+    const status = i >= 8 ? 'PENDING_REVIEW' : 'VERIFIED';
+    await prisma.verification.create({
+      data: {
+        entityType: 'SupportRequest',
+        entityId: sr.id,
+        category: 'SUPPORT_NEED',
+        status: status,
+        verifiedBy: status === 'VERIFIED' ? admin.id : null,
+        verifiedAt: status === 'VERIFIED' ? new Date() : null,
+      }
+    });
+  }
+
+  console.log('✅ Seed completed!');
+  console.log('   Created: 10 athletes, 15 achievements, 10 support requests');
+  console.log('   Created: Verification records (IDENTITY, AFFILIATION, ACHIEVEMENT, SUPPORT_NEED)');
+  console.log('   Pending review items: 2 achievements, 2 support needs, 1 identity, 1 affiliation');
   console.log('');
   console.log('Demo accounts (all use password: password123):');
   console.log('  Admin:     admin@sportsphere.com');
