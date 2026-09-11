@@ -34,13 +34,19 @@ model AthleteProfile {
   sportId                   Int?
   sport                     Sport?   @relation(fields: [sportId], references: [id])
   discipline                String?
+  currentLevel              String?  // e.g. District, State, National, International
+  ageGroup                  String?  // e.g. Under-14, Under-17, Under-20, Senior
   city                      String?
   state                     String?
   bio                       String?
   coachName                 String?
   academyName               String?
+  yearsActive               Int?
   currentGoal               String?
+  supportSummary            String?
   publicVerificationSummary String?
+  profileVerificationStatus String?  @default("NOT_SUBMITTED") // NOT_SUBMITTED, PENDING_REVIEW, VERIFIED, NEEDS_CORRECTION, REJECTED
+  profileReviewNotes        String?
   createdAt                 DateTime @default(now())
   updatedAt                 DateTime @updatedAt
 
@@ -84,7 +90,8 @@ model Achievement {
   score              String?
   date               String?
   evidenceFileId     String?
-  verificationStatus String         @default("NOT_SUBMITTED")
+  verificationStatus String         @default("NOT_SUBMITTED") // NOT_SUBMITTED, PENDING_REVIEW, VERIFIED, NEEDS_CORRECTION, REJECTED
+  reviewNotes        String?
   verifiedBy         Int?
   verifiedAt         DateTime?
   createdAt          DateTime       @default(now())

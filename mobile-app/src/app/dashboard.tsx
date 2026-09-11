@@ -2,12 +2,21 @@ import React, { useEffect, useState, useCallback } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity,
   ActivityIndicator, TextInput, ScrollView, RefreshControl,
-  StatusBar, Image, Platform, Dimensions
+  StatusBar, Image, Platform, Dimensions, Alert
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import axios from 'axios';
 import { API_URL, Storage } from '../utils/config';
+import {
+  fetchMyProfile,
+  fetchMyAchievements,
+  calculateProfileCompletion,
+  type AthleteProfile,
+  type Achievement,
+  type VerificationStatus,
+} from '../utils/athleteService';
+import VerificationStatusChip from '../components/onboarding/VerificationStatusChip';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -36,11 +45,145 @@ const inr = (n: number) =>
 function getInitials(name: string) {
   return name.split(' ').map((n: string) => n[0]).join('').toUpperCase().slice(0, 2);
 }
-
 function getColor(name: string) {
   let h = 0;
   for (let i = 0; i < name.length; i++) h = name.charCodeAt(i) + ((h << 5) - h);
   return AVATAR_COLORS[Math.abs(h) % AVATAR_COLORS.length];
+}
+
+/* ── Athlete Profile Dashboard Card (for logged-in athlete) ── */
+function AthleteProfileCard({
+  profile,
+  achievements,
+  currentUser,
+}: {
+  profile: AthleteProfile | null;
+  achievements: Achievement[];
+  currentUser: any;
+}) {
+  const hasImage = !!(currentUser?.profileImageUrl || profile?.user?.profileImageUrl);
+  const imageUri = currentUser?.profileImageUrl || profile?.user?.profileImageUrl;
+  const completion = calculateProfileCompletion(profile, achievements, hasImage);
+  const verifiedCount = achievements.filter(a => a.verificationStatus === 'VERIFIED').length;
+  const pendingCount = achievements.filter(a => a.verificationStatus === 'PENDING_REVIEW').length;
+  const correctionCount = achievements.filter(a => a.verificationStatus === 'NEEDS_CORRECTION').length;
+  const profileStatus = (profile?.profileVerificationStatus || 'NOT_SUBMITTED') as VerificationStatus;
+
+  if (!profile) {
+    return (
+      <View style={pc.card}>
+        <View style={pc.newProfileRow}>
+          <View style={pc.newProfileLeft}>
+            <Text style={pc.newProfileIcon}>🏅</Text>
+            <View>
+              <Text style={pc.newProfileTitle}>Create Athlete Profile</Text>
+              <Text style={pc.newProfileSub}>
+                Set up your verified sports portfolio.
+              </Text>
+            </View>
+          </View>
+          <TouchableOpacity
+            style={pc.createBtn}
+            onPress={() => router.push('/onboarding')}
+            activeOpacity={0.85}
+          >
+            <Text style={pc.createBtnTxt}>Start →</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  }
+
+  return (
+    <View style={pc.card}>
+      {/* Profile header */}
+      <View style={pc.profileHeader}>
+        {imageUri ? (
+          <Image source={{ uri: imageUri }} style={pc.avatar} />
+        ) : (
+          <View style={[pc.avatar, { backgroundColor: getColor(currentUser?.name || 'A') }]}>
+            <Text style={pc.avatarTxt}>{getInitials(currentUser?.name || 'A')}</Text>
+          </View>
+        )}
+        <View style={pc.profileInfo}>
+          <Text style={pc.profileName} numberOfLines={1}>{currentUser?.name}</Text>
+          <Text style={pc.profileSport} numberOfLines={1}>
+            {profile.sport?.name}{profile.discipline ? ` · ${profile.discipline}` : ''}
+          </Text>
+          {profile.city && profile.state && (
+            <Text style={pc.profileLocation}>📍 {profile.city}, {profile.state}</Text>
+          )}
+        </View>
+        <VerificationStatusChip status={profileStatus} size="sm" />
+      </View>
+
+      {/* Completion bar */}
+      <View style={pc.completionRow}>
+        <Text style={pc.completionLabel}>PROFILE COMPLETION</Text>
+        <Text style={pc.completionPct}>{completion.percentage}%</Text>
+      </View>
+      <View style={pc.progressBar}>
+        <View style={[pc.progressFill, { width: `${completion.percentage}%` as any }]} />
+      </View>
+
+      {/* Verification summary */}
+      <View style={pc.verificationRow}>
+        <View style={pc.verifyStat}>
+          <Text style={[pc.verifyStatNum, { color: '#059669' }]}>{verifiedCount}</Text>
+          <Text style={pc.verifyStatLabel}>Verified</Text>
+        </View>
+        <View style={pc.verifyStat}>
+          <Text style={[pc.verifyStatNum, { color: '#D97706' }]}>{pendingCount}</Text>
+          <Text style={pc.verifyStatLabel}>Pending</Text>
+        </View>
+        {correctionCount > 0 && (
+          <View style={pc.verifyStat}>
+            <Text style={[pc.verifyStatNum, { color: '#EA580C' }]}>{correctionCount}</Text>
+            <Text style={pc.verifyStatLabel}>Correction</Text>
+          </View>
+        )}
+        <View style={{ flex: 1 }} />
+        <TouchableOpacity
+          style={pc.viewVerifyBtn}
+          onPress={() => router.push('/athlete/verification')}
+          activeOpacity={0.85}
+        >
+          <Text style={pc.viewVerifyTxt}>View Verification →</Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* Action buttons */}
+      <View style={pc.actionRow}>
+        <TouchableOpacity
+          style={pc.editBtn}
+          onPress={() => router.push('/onboarding')}
+          activeOpacity={0.8}
+        >
+          <Text style={pc.editBtnTxt}>✏️ Edit Profile</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={pc.viewProfileBtn}
+          onPress={() => profile.id && router.push(`/athlete/${profile.id}`)}
+          activeOpacity={0.8}
+        >
+          <Text style={pc.viewProfileBtnTxt}>👤 View Public Profile</Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* Correction warning */}
+      {correctionCount > 0 && (
+        <TouchableOpacity
+          style={pc.correctionAlert}
+          onPress={() => router.push('/athlete/verification')}
+          activeOpacity={0.85}
+        >
+          <Text style={pc.correctionAlertTxt}>
+            ⚠ {correctionCount} item{correctionCount > 1 ? 's require' : ' requires'} correction — tap to fix
+          </Text>
+        </TouchableOpacity>
+      )}
+    </View>
+  );
 }
 
 /* ── Mobile Feed Post Card ── */
@@ -56,8 +199,8 @@ function AthleteCard({ item }: { item: any }) {
   return (
     <View style={styles.card}>
       {/* Header */}
-      <TouchableOpacity 
-        style={styles.cardHeader} 
+      <TouchableOpacity
+        style={styles.cardHeader}
         onPress={() => router.push(`/athlete/${item.id}`)}
         activeOpacity={0.8}
       >
@@ -92,14 +235,14 @@ function AthleteCard({ item }: { item: any }) {
       ) : null}
 
       {/* Hero Image */}
-      <TouchableOpacity 
-        activeOpacity={0.9} 
+      <TouchableOpacity
+        activeOpacity={0.9}
         onPress={() => router.push(`/athlete/${item.id}`)}
         style={styles.imageContainer}
       >
-        <Image 
-          source={{ uri: imageUrl || 'https://images.unsplash.com/photo-1552667466-07770ae110d0?ixlib=rb-1.2.1&auto=format&fit=crop&w=800&q=80' }} 
-          style={styles.postImage} 
+        <Image
+          source={{ uri: imageUrl || 'https://images.unsplash.com/photo-1552667466-07770ae110d0?ixlib=rb-1.2.1&auto=format&fit=crop&w=800&q=80' }}
+          style={styles.postImage}
         />
       </TouchableOpacity>
 
@@ -133,15 +276,15 @@ function AthleteCard({ item }: { item: any }) {
 
         {/* Action Buttons */}
         <View style={styles.actionBar}>
-          <TouchableOpacity 
+          <TouchableOpacity
             style={[styles.actionBtn, styles.actionBtnPrimary]}
             onPress={() => req ? router.push(`/support/${req.id}`) : router.push(`/athlete/${item.id}`)}
             activeOpacity={0.85}
           >
             <Text style={styles.actionBtnTextPrimary}>❤️ Support</Text>
           </TouchableOpacity>
-          
-          <TouchableOpacity 
+
+          <TouchableOpacity
             style={[styles.actionBtn, styles.actionBtnSecondary]}
             onPress={() => router.push(`/athlete/${item.id}`)}
             activeOpacity={0.85}
@@ -166,11 +309,32 @@ export default function DashboardScreen() {
   const [sports, setSports] = useState<string[]>([]);
   const [searchFocused, setSearchFocused] = useState(false);
   const [currentUser, setCurrentUser] = useState<any>(null);
+  const [athleteProfile, setAthleteProfile] = useState<AthleteProfile | null>(null);
+  const [myAchievements, setMyAchievements] = useState<Achievement[]>([]);
+  const [loadingProfile, setLoadingProfile] = useState(false);
 
   const loadUserData = async () => {
     try {
       const stored = await Storage.getItem('userData');
-      if (stored) setCurrentUser(JSON.parse(stored));
+      if (stored) {
+        const user = JSON.parse(stored);
+        setCurrentUser(user);
+        // If athlete, load their profile for the dashboard card
+        if (user.role === 'ATHLETE') {
+          setLoadingProfile(true);
+          try {
+            const [p, a] = await Promise.all([
+              fetchMyProfile(),
+              fetchMyAchievements(),
+            ]);
+            setAthleteProfile(p);
+            setMyAchievements(a);
+          } catch {
+            // No profile yet
+          }
+          setLoadingProfile(false);
+        }
+      }
     } catch (e) {
       console.warn('Failed to parse userData:', e);
     }
@@ -204,8 +368,8 @@ export default function DashboardScreen() {
       setFiltered(res.data);
       const unique = [...new Set(res.data.map((a: any) => a.sport?.name).filter(Boolean))] as string[];
       setSports(unique);
-    } catch (err) { 
-      console.error('Fetch athletes error:', err); 
+    } catch (err) {
+      console.error('Fetch athletes error:', err);
     }
     setLoading(false);
     setRefreshing(false);
@@ -214,15 +378,8 @@ export default function DashboardScreen() {
   const onRefresh = useCallback(() => {
     setRefreshing(true);
     fetchAthletes();
+    loadUserData();
   }, []);
-
-  const handleProfilePress = () => {
-    if (currentUser?.role === 'ATHLETE' && currentUser?.athleteProfile?.id) {
-      router.push(`/athlete/${currentUser.athleteProfile.id}`);
-    } else {
-      alert(`User: ${currentUser?.name || 'Supporter'}\nRole: ${currentUser?.role || 'SUPPORTER'}`);
-    }
-  };
 
   const handleLogout = async () => {
     await Storage.removeItem('userToken');
@@ -234,13 +391,43 @@ export default function DashboardScreen() {
     return (
       <View style={[styles.center, { paddingTop: insets.top }]}>
         <ActivityIndicator size="large" color={PRIMARY} />
-        <Text style={styles.loadingText}>Loading Sportsphere Feed...</Text>
+        <Text style={styles.loadingText}>Loading SportSphere...</Text>
       </View>
     );
   }
 
+  const isAthlete = currentUser?.role === 'ATHLETE';
+
   const renderListHeader = () => (
     <View style={styles.listHeaderWrapper}>
+      {/* ── Athlete Dashboard Card ── */}
+      {isAthlete && (
+        <View style={styles.athleteCardWrapper}>
+          <Text style={styles.myProfileLabel}>MY PROFILE</Text>
+          {loadingProfile ? (
+            <View style={styles.profileLoading}>
+              <ActivityIndicator size="small" color={PRIMARY} />
+              <Text style={styles.profileLoadingTxt}>Loading your profile...</Text>
+            </View>
+          ) : (
+            <AthleteProfileCard
+              profile={athleteProfile}
+              achievements={myAchievements}
+              currentUser={currentUser}
+            />
+          )}
+        </View>
+      )}
+
+      {/* Divider */}
+      {isAthlete && (
+        <View style={styles.feedDivider}>
+          <View style={styles.feedDividerLine} />
+          <Text style={styles.feedDividerLabel}>ATHLETE COMMUNITY</Text>
+          <View style={styles.feedDividerLine} />
+        </View>
+      )}
+
       {/* Search Input */}
       <View style={styles.searchWrap}>
         <View style={[styles.searchBarContainer, searchFocused && styles.searchFocused]}>
@@ -303,10 +490,21 @@ export default function DashboardScreen() {
             </View>
             <Text style={styles.headerSub}>Verified Athlete Community</Text>
           </View>
-          
-          <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout} activeOpacity={0.75}>
-            <Text style={styles.logoutText}>LOG OUT</Text>
-          </TouchableOpacity>
+
+          <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
+            {isAthlete && (
+              <TouchableOpacity
+                style={styles.verifyNavBtn}
+                onPress={() => router.push('/athlete/verification')}
+                activeOpacity={0.75}
+              >
+                <Text style={styles.verifyNavTxt}>🛡️ Verify</Text>
+              </TouchableOpacity>
+            )}
+            <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout} activeOpacity={0.75}>
+              <Text style={styles.logoutText}>LOG OUT</Text>
+            </TouchableOpacity>
+          </View>
         </View>
       </View>
 
@@ -342,19 +540,27 @@ export default function DashboardScreen() {
             <Text style={styles.navIcon}>⚡</Text>
             <Text style={[styles.navLabel, { color: PRIMARY, fontWeight: '800' }]}>Feed</Text>
           </TouchableOpacity>
-          
-          <TouchableOpacity style={styles.navItem} onPress={() => alert('Verification badge system is live!')} activeOpacity={0.7}>
+
+          <TouchableOpacity
+            style={styles.navItem}
+            onPress={() => isAthlete ? router.push('/athlete/verification') : Alert.alert('Verification', 'Create an athlete account to access verification.')}
+            activeOpacity={0.7}
+          >
             <Text style={styles.navIcon}>🛡️</Text>
             <Text style={styles.navLabel}>Verify</Text>
           </TouchableOpacity>
-          
-          <TouchableOpacity style={styles.navItem} onPress={handleProfilePress} activeOpacity={0.7}>
+
+          <TouchableOpacity
+            style={styles.navItem}
+            onPress={() => isAthlete ? router.push('/onboarding') : Alert.alert('Profile', `Signed in as ${currentUser?.name || 'Supporter'}`)}
+            activeOpacity={0.7}
+          >
             {currentUser?.profileImageUrl ? (
               <Image source={{ uri: currentUser.profileImageUrl }} style={styles.navAvatar} />
             ) : (
               <Text style={styles.navIcon}>👤</Text>
             )}
-            <Text style={styles.navLabel}>Profile</Text>
+            <Text style={styles.navLabel}>{isAthlete ? 'My Profile' : 'Profile'}</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -362,20 +568,134 @@ export default function DashboardScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { 
-    flex: 1, 
-    backgroundColor: BG 
-  },
-  center: { 
-    flex: 1, 
-    backgroundColor: BG, 
-    justifyContent: 'center', 
-    alignItems: 'center', 
-    gap: 12 
-  },
+// ─── Profile Card Styles ─────────────────────────────────────
 
-  // Sticky Top Bar
+const pc = StyleSheet.create({
+  card: {
+    backgroundColor: CARD_BG,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: BORDER,
+    padding: 14,
+    gap: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.06,
+    shadowRadius: 10,
+    elevation: 3,
+  },
+  profileHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  avatar: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: '#F3F4F6',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: PRIMARY,
+  },
+  avatarTxt: { color: '#fff', fontSize: 18, fontWeight: '900' },
+  profileInfo: { flex: 1 },
+  profileName: { fontSize: 16, fontWeight: '900', color: TEXT_MAIN },
+  profileSport: { fontSize: 12.5, color: PRIMARY, fontWeight: '700', marginTop: 1 },
+  profileLocation: { fontSize: 11, color: TEXT_FAINT, marginTop: 1 },
+
+  completionRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  completionLabel: { fontSize: 9.5, fontWeight: '900', color: TEXT_FAINT, letterSpacing: 1 },
+  completionPct: { fontSize: 14, fontWeight: '900', color: PRIMARY },
+  progressBar: { height: 5, backgroundColor: '#F3F4F6', borderRadius: 2.5, overflow: 'hidden' },
+  progressFill: { height: '100%', backgroundColor: PRIMARY, borderRadius: 2.5 },
+
+  verificationRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  verifyStat: { alignItems: 'center', gap: 1 },
+  verifyStatNum: { fontSize: 18, fontWeight: '900' },
+  verifyStatLabel: { fontSize: 9, fontWeight: '600', color: TEXT_FAINT },
+  viewVerifyBtn: {
+    backgroundColor: '#F0FDF4',
+    borderWidth: 1,
+    borderColor: '#BBF7D0',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  viewVerifyTxt: { fontSize: 11, fontWeight: '800', color: '#059669' },
+
+  actionRow: { flexDirection: 'row', gap: 8 },
+  editBtn: {
+    flex: 1,
+    borderWidth: 1.5,
+    borderColor: BORDER,
+    borderRadius: 10,
+    paddingVertical: 9,
+    alignItems: 'center',
+  },
+  editBtnTxt: { fontSize: 12.5, fontWeight: '700', color: TEXT_MAIN },
+  viewProfileBtn: {
+    flex: 1,
+    borderWidth: 1.5,
+    borderColor: '#BFDBFE',
+    borderRadius: 10,
+    paddingVertical: 9,
+    alignItems: 'center',
+    backgroundColor: '#EFF6FF',
+  },
+  viewProfileBtnTxt: { fontSize: 12.5, fontWeight: '700', color: '#1D4ED8' },
+
+  correctionAlert: {
+    backgroundColor: '#FFF7ED',
+    borderWidth: 1,
+    borderColor: '#FDBA74',
+    borderRadius: 10,
+    paddingVertical: 9,
+    paddingHorizontal: 12,
+    alignItems: 'center',
+  },
+  correctionAlertTxt: { fontSize: 12, fontWeight: '700', color: '#EA580C' },
+
+  // New profile prompt
+  newProfileRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  newProfileLeft: { flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 },
+  newProfileIcon: { fontSize: 28 },
+  newProfileTitle: { fontSize: 14, fontWeight: '800', color: TEXT_MAIN },
+  newProfileSub: { fontSize: 11.5, color: TEXT_DIM },
+  createBtn: {
+    backgroundColor: PRIMARY,
+    paddingHorizontal: 16,
+    paddingVertical: 9,
+    borderRadius: 10,
+    shadowColor: PRIMARY,
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.2,
+    shadowRadius: 6,
+    elevation: 3,
+  },
+  createBtnTxt: { color: '#fff', fontWeight: '900', fontSize: 13 },
+});
+
+// ─── Main Styles ─────────────────────────────────────────────
+
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: BG },
+  center: { flex: 1, backgroundColor: BG, justifyContent: 'center', alignItems: 'center', gap: 12 },
+
   topBar: {
     backgroundColor: CARD_BG,
     borderBottomWidth: 1,
@@ -400,25 +720,68 @@ const styles = StyleSheet.create({
   logoW: { fontSize: 20, fontWeight: '900', color: TEXT_MAIN, letterSpacing: -0.8, fontStyle: 'italic' },
   logoA: { fontSize: 20, fontWeight: '900', color: PRIMARY, letterSpacing: -0.8, fontStyle: 'italic' },
   headerSub: { fontSize: 9.5, fontWeight: '700', color: TEXT_FAINT, textTransform: 'uppercase', letterSpacing: 0.8, marginTop: 1 },
-  logoutBtn: { 
-    backgroundColor: '#F3F4F6', 
-    paddingHorizontal: 10, 
-    paddingVertical: 6, 
-    borderRadius: 8, 
-    borderWidth: 1, 
-    borderColor: BORDER 
+  verifyNavBtn: {
+    backgroundColor: '#F0FDF4',
+    borderWidth: 1,
+    borderColor: '#BBF7D0',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+  },
+  verifyNavTxt: { fontSize: 11, fontWeight: '800', color: '#059669' },
+  logoutBtn: {
+    backgroundColor: '#F3F4F6',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: BORDER,
   },
   logoutText: { fontSize: 10, fontWeight: '800', color: TEXT_DIM, letterSpacing: 0.8 },
   loadingText: { color: TEXT_DIM, fontSize: 14, fontWeight: '600' },
 
-  // List Header / Search
-  listHeaderWrapper: { 
+  listHeaderWrapper: {
     width: '100%',
     maxWidth: 500,
     alignSelf: 'center',
-    paddingTop: 10, 
-    paddingBottom: 4 
+    paddingTop: 10,
+    paddingBottom: 4,
   },
+
+  athleteCardWrapper: {
+    paddingHorizontal: 12,
+    marginBottom: 8,
+  },
+  myProfileLabel: {
+    fontSize: 10,
+    fontWeight: '900',
+    color: TEXT_FAINT,
+    letterSpacing: 1.5,
+    marginBottom: 8,
+    marginLeft: 2,
+  },
+  profileLoading: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: CARD_BG,
+    borderRadius: 14,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: BORDER,
+  },
+  profileLoadingTxt: { fontSize: 13, color: TEXT_DIM, fontWeight: '600' },
+
+  feedDivider: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 16,
+    marginVertical: 10,
+  },
+  feedDividerLine: { flex: 1, height: 1, backgroundColor: BORDER },
+  feedDividerLabel: { fontSize: 10, fontWeight: '800', color: TEXT_FAINT, letterSpacing: 1.5 },
+
   searchWrap: { paddingHorizontal: 14, marginBottom: 8 },
   searchBarContainer: {
     flexDirection: 'row',
@@ -436,135 +799,52 @@ const styles = StyleSheet.create({
     elevation: 1,
   },
   searchIcon: { fontSize: 13, marginRight: 8 },
-  searchInput: {
-    flex: 1,
-    color: TEXT_MAIN,
-    fontSize: 13.5,
-    fontWeight: '500',
-    padding: 0,
-  },
+  searchInput: { flex: 1, color: TEXT_MAIN, fontSize: 13.5, fontWeight: '500', padding: 0 },
   clearBtn: { padding: 4 },
   searchFocused: { borderColor: PRIMARY },
 
-  pillsRow: { 
-    gap: 6, 
-    paddingHorizontal: 14, 
-    paddingVertical: 4, 
-    alignItems: 'center' 
-  },
+  pillsRow: { gap: 6, paddingHorizontal: 14, paddingVertical: 4, alignItems: 'center' },
   pill: {
-    paddingHorizontal: 12, 
-    paddingVertical: 7, 
+    paddingHorizontal: 12,
+    paddingVertical: 7,
     borderRadius: 16,
-    backgroundColor: CARD_BG, 
-    borderWidth: 1, 
-    borderColor: BORDER,
-  },
-  pillActive: { 
-    backgroundColor: TEXT_MAIN, 
-    borderColor: TEXT_MAIN 
-  },
-  pillText: { fontSize: 11.5, fontWeight: '700', color: TEXT_DIM },
-  pillTextActive: { color: '#fff' },
-
-  count: { 
-    paddingHorizontal: 16, 
-    paddingTop: 8, 
-    paddingBottom: 4, 
-    fontSize: 11.5, 
-    fontWeight: '600', 
-    color: TEXT_FAINT 
-  },
-
-  listContainer: {
-    width: '100%',
-    maxWidth: 500,
-    alignSelf: 'center',
-  },
-
-  // Social Feed Card
-  card: {
     backgroundColor: CARD_BG,
     borderWidth: 1,
     borderColor: BORDER,
-    borderRadius: 18,
-    marginHorizontal: 12,
-    marginBottom: 14,
-    overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.04,
-    shadowRadius: 6,
-    elevation: 2,
   },
-  cardHeader: { 
-    flexDirection: 'row', 
-    alignItems: 'center', 
-    padding: 12 
+  pillActive: { backgroundColor: TEXT_MAIN, borderColor: TEXT_MAIN },
+  pillText: { fontSize: 11.5, fontWeight: '700', color: TEXT_DIM },
+  pillTextActive: { color: '#fff' },
+
+  count: { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 4, fontSize: 11.5, fontWeight: '600', color: TEXT_FAINT },
+
+  listContainer: { width: '100%', maxWidth: 500, alignSelf: 'center' },
+
+  // Feed cards (unchanged from original)
+  card: {
+    backgroundColor: CARD_BG, borderWidth: 1, borderColor: BORDER,
+    borderRadius: 18, marginHorizontal: 12, marginBottom: 14, overflow: 'hidden',
+    shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.04, shadowRadius: 6, elevation: 2,
   },
-  avatar: { 
-    width: 42, 
-    height: 42, 
-    borderRadius: 21, 
-    justifyContent: 'center', 
-    alignItems: 'center', 
-    backgroundColor: '#F3F4F6' 
-  },
+  cardHeader: { flexDirection: 'row', alignItems: 'center', padding: 12 },
+  avatar: { width: 42, height: 42, borderRadius: 21, justifyContent: 'center', alignItems: 'center', backgroundColor: '#F3F4F6' },
   avatarText: { color: '#fff', fontSize: 14, fontWeight: '800' },
   headerTextWrap: { flex: 1, marginLeft: 10 },
   nameRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   athleteName: { fontSize: 14.5, fontWeight: '800', color: TEXT_MAIN },
-  verifiedBadge: {
-    backgroundColor: '#ECFDF5',
-    borderWidth: 0.8,
-    borderColor: '#A7F3D0',
-    paddingHorizontal: 4,
-    paddingVertical: 1,
-    borderRadius: 4,
-  },
+  verifiedBadge: { backgroundColor: '#ECFDF5', borderWidth: 0.8, borderColor: '#A7F3D0', paddingHorizontal: 4, paddingVertical: 1, borderRadius: 4 },
   verifiedIconText: { color: '#059669', fontSize: 8.5, fontWeight: '900', letterSpacing: 0.5 },
   athleteSub: { fontSize: 12, color: TEXT_DIM, marginTop: 1, fontWeight: '500' },
   athleteLocation: { fontSize: 11, color: TEXT_FAINT, marginTop: 1 },
-
-  cardBody: { 
-    paddingHorizontal: 12, 
-    paddingBottom: 10 
-  },
+  cardBody: { paddingHorizontal: 12, paddingBottom: 10 },
   bio: { fontSize: 13, color: '#374151', lineHeight: 18.5 },
-
-  imageContainer: {
-    width: '100%',
-    aspectRatio: 16 / 10,
-    backgroundColor: '#F3F4F6',
-  },
-  postImage: { 
-    width: '100%', 
-    height: '100%', 
-    resizeMode: 'cover' 
-  },
-
+  imageContainer: { width: '100%', aspectRatio: 16 / 10, backgroundColor: '#F3F4F6' },
+  postImage: { width: '100%', height: '100%', resizeMode: 'cover' },
   cardFooter: { padding: 12 },
-  statsRow: { 
-    flexDirection: 'row', 
-    gap: 6, 
-    marginBottom: 10 
-  },
-  statPill: {
-    backgroundColor: '#F3F4F6',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 6,
-  },
+  statsRow: { flexDirection: 'row', gap: 6, marginBottom: 10 },
+  statPill: { backgroundColor: '#F3F4F6', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 },
   statPillText: { fontSize: 11, fontWeight: '700', color: TEXT_DIM },
-
-  needBox: { 
-    backgroundColor: '#F9FAFB', 
-    padding: 10, 
-    borderRadius: 10, 
-    borderWidth: 1, 
-    borderColor: BORDER, 
-    marginBottom: 10 
-  },
+  needBox: { backgroundColor: '#F9FAFB', padding: 10, borderRadius: 10, borderWidth: 1, borderColor: BORDER, marginBottom: 10 },
   needHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 },
   needTitle: { fontSize: 12, fontWeight: '700', color: TEXT_MAIN, flex: 1 },
   needPct: { fontSize: 12, fontWeight: '800', color: PRIMARY },
@@ -573,20 +853,12 @@ const styles = StyleSheet.create({
   needMetaRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   needMeta: { fontSize: 10.5, color: TEXT_MAIN, fontWeight: '700' },
   needGoal: { fontSize: 10.5, color: TEXT_FAINT, fontWeight: '500' },
-
   actionBar: { flexDirection: 'row', gap: 8, marginTop: 2 },
-  actionBtn: { 
-    flex: 1, 
-    paddingVertical: 9, 
-    borderRadius: 10, 
-    alignItems: 'center', 
-    justifyContent: 'center' 
-  },
+  actionBtn: { flex: 1, paddingVertical: 9, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
   actionBtnPrimary: { backgroundColor: PRIMARY },
   actionBtnSecondary: { backgroundColor: '#F3F4F6', borderWidth: 1, borderColor: BORDER },
   actionBtnTextPrimary: { color: '#fff', fontWeight: '800', fontSize: 12.5 },
   actionBtnTextSecondary: { color: TEXT_MAIN, fontWeight: '800', fontSize: 12.5 },
-
   emptyState: { alignItems: 'center', paddingTop: 40, paddingBottom: 30 },
   emptyIcon: { fontSize: 40, marginBottom: 8 },
   emptyTitle: { fontSize: 15, fontWeight: '800', color: TEXT_MAIN },
@@ -594,34 +866,12 @@ const styles = StyleSheet.create({
 
   // Bottom Nav Bar
   bottomNav: {
-    position: 'absolute', 
-    bottom: 0, 
-    left: 0, 
-    right: 0, 
-    backgroundColor: CARD_BG,
-    borderTopWidth: 1, 
-    borderTopColor: BORDER, 
-    alignItems: 'center',
-    shadowColor: '#000', 
-    shadowOffset: { width: 0, height: -2 }, 
-    shadowOpacity: 0.04, 
-    shadowRadius: 4, 
-    elevation: 8,
+    position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: CARD_BG,
+    borderTopWidth: 1, borderTopColor: BORDER, alignItems: 'center',
+    shadowColor: '#000', shadowOffset: { width: 0, height: -2 }, shadowOpacity: 0.04, shadowRadius: 4, elevation: 8,
   },
-  navContainer: { 
-    width: '100%', 
-    maxWidth: 500, 
-    height: 52, 
-    flexDirection: 'row', 
-    justifyContent: 'space-around', 
-    alignItems: 'center' 
-  },
-  navItem: { 
-    alignItems: 'center', 
-    justifyContent: 'center',
-    paddingHorizontal: 16, 
-    paddingVertical: 4 
-  },
+  navContainer: { width: '100%', maxWidth: 500, height: 52, flexDirection: 'row', justifyContent: 'space-around', alignItems: 'center' },
+  navItem: { alignItems: 'center', justifyContent: 'center', paddingHorizontal: 16, paddingVertical: 4 },
   navIcon: { fontSize: 16, marginBottom: 1 },
   navAvatar: { width: 20, height: 20, borderRadius: 10, borderWidth: 1.5, borderColor: PRIMARY, marginBottom: 1 },
   navLabel: { fontSize: 9.5, fontWeight: '600', color: TEXT_FAINT },
