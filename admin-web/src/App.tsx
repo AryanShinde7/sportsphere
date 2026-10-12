@@ -1,12 +1,19 @@
 import React, { useState, useEffect } from 'react';
-import axios from 'axios';
 import {
   Shield, Users, Activity, FileCheck, LogOut,
-  CheckCircle, XCircle, Clock, ChevronRight, Zap
+  CheckCircle, XCircle, Clock, ChevronRight, Zap, Briefcase
 } from 'lucide-react';
 import './index.css';
-
-const API_URL = 'http://localhost:5000/api';
+import {
+  authApi,
+  adminApi,
+  athletesApi,
+  getAdminToken,
+  getAdminUser,
+  setAdminAuth,
+  clearAdminAuth,
+  type User,
+} from './api';
 
 const AVATAR_COLORS = [
   '#C2410C', '#0891B2', '#7C3AED', '#059669',
@@ -26,7 +33,7 @@ function getAvatarColor(name: string) {
 /* ══════════════════════════════════════
    LOGIN SCREEN
 ══════════════════════════════════════ */
-function LoginScreen({ onLogin }: { onLogin: (token: string, user: any) => void }) {
+function LoginScreen({ onLogin }: { onLogin: (token: string, user: User) => void }) {
   const [email, setEmail] = useState('admin@sportsphere.com');
   const [password, setPassword] = useState('password123');
   const [loading, setLoading] = useState(false);
@@ -37,15 +44,14 @@ function LoginScreen({ onLogin }: { onLogin: (token: string, user: any) => void 
     setError('');
     setLoading(true);
     try {
-      const res = await axios.post(`${API_URL}/auth/login`, { email, password });
-      if (res.data.user.role !== 'ADMIN') {
+      const res = await authApi.login(email, password);
+      if (res.user.role !== 'ADMIN') {
         setError('Access denied. This portal is for administrators only.');
         setLoading(false);
         return;
       }
-      localStorage.setItem('adminToken', res.data.token);
-      localStorage.setItem('adminUser', JSON.stringify(res.data.user));
-      onLogin(res.data.token, res.data.user);
+      setAdminAuth(res.token, res.user);
+      onLogin(res.token, res.user);
     } catch {
       setError('Invalid credentials. Please try again.');
     }
@@ -157,10 +163,37 @@ function StatCard({ icon, label, value, color, delay = 0 }: {
 /* ══════════════════════════════════════
    VERIFICATION ITEM
 ══════════════════════════════════════ */
-function VerificationItem({ item, onDecision }: { item: any; onDecision: (id: number, d: 'approve' | 'reject') => void }) {
-  const name = item.athlete?.user?.name || 'Unknown Athlete';
+function VerificationItem({
+  item,
+  onDecision,
+  actionLoading,
+}: {
+  item: any;
+  onDecision: (id: number, d: 'approve' | 'reject') => Promise<void>;
+  actionLoading?: 'approve' | 'reject' | null;
+}) {
+  const name =
+    item.athleteName ||
+    item.athlete?.user?.name ||
+    item.entity?.athlete?.user?.name ||
+    item.entity?.user?.name ||
+    'Unknown Athlete';
   const color = getAvatarColor(name);
-  const sport = item.athlete?.sport?.name || 'Unknown Sport';
+  const sport =
+    item.entity?.athlete?.discipline ||
+    item.entity?.discipline ||
+    item.athlete?.sport?.name ||
+    item.category ||
+    'Athlete';
+  const title =
+    item.title ||
+    item.entity?.title ||
+    item.entity?.description ||
+    `${item.category || 'Item'} Verification`;
+
+  const isRejecting = actionLoading === 'reject';
+  const isApproving = actionLoading === 'approve';
+  const isPendingAction = isRejecting || isApproving;
 
   return (
     <div className="list-item animate-fade-in">
@@ -169,28 +202,50 @@ function VerificationItem({ item, onDecision }: { item: any; onDecision: (id: nu
       </div>
       <div style={{ flex: 1, minWidth: 0 }}>
         <p style={{ fontWeight: 700, fontSize: '0.875rem', marginBottom: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-          {item.title}
+          {title}
         </p>
         <p style={{ fontSize: '0.75rem', color: 'var(--muted-foreground)' }}>
           {name} · {sport}
         </p>
       </div>
-      <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
+      <div style={{ display: 'flex', gap: 8, flexShrink: 0, alignItems: 'center' }}>
         <button
+          id={`reject-btn-${item.id}`}
           className="btn btn-sm btn-danger"
           onClick={() => onDecision(item.id, 'reject')}
-          style={{ fontStyle: 'normal', padding: '6px 12px' }}
+          disabled={isPendingAction}
+          style={{
+            fontStyle: 'normal',
+            padding: '6px 12px',
+            opacity: isPendingAction ? 0.6 : 1,
+            cursor: isPendingAction ? 'not-allowed' : 'pointer',
+          }}
         >
-          <XCircle size={13} />
-          Reject
+          {isRejecting ? (
+            <div className="spinner" style={{ width: 12, height: 12, borderWidth: 2 }} />
+          ) : (
+            <XCircle size={13} />
+          )}
+          {isRejecting ? 'Rejecting...' : 'Reject'}
         </button>
         <button
+          id={`approve-btn-${item.id}`}
           className="btn btn-sm btn-success"
           onClick={() => onDecision(item.id, 'approve')}
-          style={{ fontStyle: 'normal', padding: '6px 14px' }}
+          disabled={isPendingAction}
+          style={{
+            fontStyle: 'normal',
+            padding: '6px 14px',
+            opacity: isPendingAction ? 0.6 : 1,
+            cursor: isPendingAction ? 'not-allowed' : 'pointer',
+          }}
         >
-          <CheckCircle size={13} />
-          Approve
+          {isApproving ? (
+            <div className="spinner" style={{ width: 12, height: 12, borderWidth: 2 }} />
+          ) : (
+            <CheckCircle size={13} />
+          )}
+          {isApproving ? 'Approving...' : 'Approve'}
         </button>
       </div>
     </div>
@@ -239,6 +294,115 @@ function AthleteRow({ athlete, index }: { athlete: any; index: number }) {
 }
 
 /* ══════════════════════════════════════
+   SPONSORSHIP PROPOSAL ROW
+══════════════════════════════════════ */
+function SponsorshipRow({
+  item,
+  onUpdateStatus,
+  updating,
+}: {
+  item: any;
+  onUpdateStatus: (id: number, status: string) => Promise<void>;
+  updating: boolean;
+}) {
+  const sponsorName = item.sponsor?.organizationName || item.sponsor?.user?.name || 'Corporate Sponsor';
+  const sponsorEmail = item.sponsor?.user?.email;
+  const athleteName = item.athlete?.user?.name || 'Athlete';
+  const sport = item.athlete?.sport?.name || 'Sport';
+  const status = item.status || 'SUBMITTED';
+
+  const getStatusBadge = () => {
+    switch (status) {
+      case 'ACCEPTED':
+        return <span className="badge badge-success" style={{ padding: '3px 8px', fontSize: '0.6875rem' }}>Accepted</span>;
+      case 'DECLINED':
+        return <span className="badge badge-danger" style={{ padding: '3px 8px', fontSize: '0.6875rem' }}>Declined</span>;
+      case 'REVIEWING':
+        return <span className="badge badge-warning" style={{ padding: '3px 8px', fontSize: '0.6875rem' }}>Reviewing</span>;
+      default:
+        return <span className="badge badge-muted" style={{ padding: '3px 8px', fontSize: '0.6875rem' }}>Submitted</span>;
+    }
+  };
+
+  return (
+    <div className="list-item animate-fade-in" style={{ padding: '16px 20px', alignItems: 'flex-start' }}>
+      <div className="avatar" style={{ background: '#0F172A', color: '#fff', fontSize: '0.75rem', marginTop: 2 }}>
+        💼
+      </div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+          <p style={{ fontWeight: 800, fontSize: '0.9375rem', margin: 0 }}>
+            {sponsorName}
+          </p>
+          {getStatusBadge()}
+        </div>
+        <p style={{ fontSize: '0.75rem', color: 'var(--muted-foreground)', marginBottom: 6 }}>
+          Target: <strong style={{ color: 'var(--foreground)' }}>{athleteName}</strong> ({sport})
+          {sponsorEmail ? ` · Contact: ${sponsorEmail}` : ''}
+        </p>
+        <div style={{ display: 'flex', gap: 12, fontSize: '0.75rem', marginBottom: 6, flexWrap: 'wrap' }}>
+          <span style={{ color: 'var(--primary)', fontWeight: 700 }}>
+            Type: {item.supportType || 'FINANCIAL'}
+          </span>
+          {item.proposedAmount && (
+            <span style={{ fontWeight: 700 }}>
+              Amount: {item.proposedAmount}
+            </span>
+          )}
+          {item.duration && (
+            <span style={{ color: 'var(--muted-foreground)' }}>
+              Duration: {item.duration}
+            </span>
+          )}
+        </div>
+        {item.message && (
+          <p style={{ fontSize: '0.75rem', color: 'var(--muted-foreground)', fontStyle: 'italic', background: 'rgba(255,255,255,0.03)', padding: '6px 10px', borderRadius: 6, margin: 0 }}>
+            "{item.message}"
+          </p>
+        )}
+      </div>
+
+      {/* Action controls */}
+      <div style={{ display: 'flex', gap: 6, flexShrink: 0, marginTop: 4 }}>
+        {status !== 'REVIEWING' && status !== 'ACCEPTED' && (
+          <button
+            id={`review-sponsor-btn-${item.id}`}
+            className="btn btn-sm btn-secondary"
+            onClick={() => onUpdateStatus(item.id, 'REVIEWING')}
+            disabled={updating}
+            style={{ fontSize: '0.6875rem', padding: '5px 10px' }}
+          >
+            Review
+          </button>
+        )}
+        {status !== 'ACCEPTED' && (
+          <button
+            id={`accept-sponsor-btn-${item.id}`}
+            className="btn btn-sm btn-success"
+            onClick={() => onUpdateStatus(item.id, 'ACCEPTED')}
+            disabled={updating}
+            style={{ fontSize: '0.6875rem', padding: '5px 10px' }}
+          >
+            Accept
+          </button>
+        )}
+        {status !== 'DECLINED' && (
+          <button
+            id={`decline-sponsor-btn-${item.id}`}
+            className="btn btn-sm btn-danger"
+            onClick={() => onUpdateStatus(item.id, 'DECLINED')}
+            disabled={updating}
+            style={{ fontSize: '0.6875rem', padding: '5px 10px' }}
+          >
+            Decline
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════
    DASHBOARD HOME
 ══════════════════════════════════════ */
 function Dashboard({ user, onLogout }: { user: any; onLogout: () => void }) {
@@ -246,7 +410,12 @@ function Dashboard({ user, onLogout }: { user: any; onLogout: () => void }) {
   const [athletes, setAthletes] = useState<any[]>([]);
   const [decisions, setDecisions] = useState<Record<number, 'approve' | 'reject'>>({});
   const [loading, setLoading] = useState(true);
-  const token = localStorage.getItem('adminToken');
+  const [actionLoading, setActionLoading] = useState<Record<number, 'approve' | 'reject'>>({});
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [actionSuccess, setActionSuccess] = useState<string | null>(null);
+
+  const [sponsorships, setSponsorships] = useState<any[]>([]);
+  const [updatingSponsorId, setUpdatingSponsorId] = useState<number | null>(null);
 
   useEffect(() => {
     fetchData();
@@ -254,20 +423,63 @@ function Dashboard({ user, onLogout }: { user: any; onLogout: () => void }) {
 
   const fetchData = async () => {
     try {
-      const [dashRes, athRes] = await Promise.all([
-        axios.get(`${API_URL}/admin/dashboard`, { headers: { Authorization: `Bearer ${token}` } }),
-        axios.get(`${API_URL}/athletes`),
+      const [dashRes, athRes, sponRes] = await Promise.all([
+        adminApi.getDashboard(),
+        athletesApi.getAll(),
+        adminApi.getSponsorshipInterests(),
       ]);
-      setDashboard(dashRes.data);
-      setAthletes(athRes.data.slice(0, 5));
+      setDashboard(dashRes);
+      setAthletes(athRes.slice(0, 5));
+      setSponsorships(sponRes || []);
     } catch (err) {
-      console.error(err);
+      console.error('Failed to load dashboard:', err);
     }
     setLoading(false);
   };
 
-  const handleDecision = (id: number, decision: 'approve' | 'reject') => {
-    setDecisions(d => ({ ...d, [id]: decision }));
+  const handleUpdateSponsorshipStatus = async (id: number, newStatus: string) => {
+    setUpdatingSponsorId(id);
+    try {
+      await adminApi.updateSponsorshipInterest(id, newStatus);
+      const updatedList = await adminApi.getSponsorshipInterests();
+      setSponsorships(updatedList);
+    } catch (err) {
+      console.error('Failed to update sponsorship status:', err);
+    } finally {
+      setUpdatingSponsorId(null);
+    }
+  };
+
+  const handleDecision = async (id: number, decision: 'approve' | 'reject') => {
+    setActionLoading(prev => ({ ...prev, [id]: decision }));
+    setActionError(null);
+    setActionSuccess(null);
+    try {
+      if (decision === 'approve') {
+        await adminApi.approveVerification(id, 'Approved via admin dashboard');
+      } else {
+        await adminApi.rejectVerification(id, 'Rejected via admin dashboard');
+      }
+
+      setDecisions(d => ({ ...d, [id]: decision }));
+
+      // Re-fetch dashboard data to refresh counts and list from DB
+      const updatedDash = await adminApi.getDashboard();
+      setDashboard(updatedDash);
+      setActionSuccess(`Verification item #${id} has been ${decision === 'approve' ? 'approved' : 'rejected'}.`);
+    } catch (err: any) {
+      console.error(`Verification ${decision} failed:`, err);
+      const errMsg =
+        err.response?.data?.error ||
+        `Failed to ${decision} verification #${id}. Check server connection.`;
+      setActionError(errMsg);
+    } finally {
+      setActionLoading(prev => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
+    }
   };
 
   const pendingItems = dashboard?.pendingVerifications?.filter((item: any) => !decisions[item.id]) || [];
@@ -401,10 +613,67 @@ function Dashboard({ user, onLogout }: { user: any; onLogout: () => void }) {
               )}
             </div>
 
+            {actionError && (
+              <div
+                style={{
+                  margin: '12px 20px 0',
+                  padding: '10px 14px',
+                  background: 'rgba(239, 68, 68, 0.12)',
+                  border: '1px solid rgba(239, 68, 68, 0.3)',
+                  borderRadius: 8,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: 8,
+                }}
+              >
+                <span style={{ fontSize: '0.75rem', color: 'var(--destructive)', fontWeight: 600 }}>
+                  {actionError}
+                </span>
+                <button
+                  onClick={() => setActionError(null)}
+                  style={{ background: 'none', border: 'none', color: 'var(--muted-foreground)', cursor: 'pointer', padding: 2 }}
+                >
+                  ✕
+                </button>
+              </div>
+            )}
+
+            {actionSuccess && (
+              <div
+                style={{
+                  margin: '12px 20px 0',
+                  padding: '10px 14px',
+                  background: 'rgba(16, 185, 129, 0.12)',
+                  border: '1px solid rgba(16, 185, 129, 0.3)',
+                  borderRadius: 8,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: 8,
+                }}
+              >
+                <span style={{ fontSize: '0.75rem', color: 'var(--success)', fontWeight: 600 }}>
+                  {actionSuccess}
+                </span>
+                <button
+                  onClick={() => setActionSuccess(null)}
+                  style={{ background: 'none', border: 'none', color: 'var(--muted-foreground)', cursor: 'pointer', padding: 2 }}
+                >
+                  ✕
+                </button>
+              </div>
+            )}
+
             <div style={{ marginTop: 12 }}>
               {pendingCount > 0 ? (
                 pendingItems.slice(0, 5).map((item: any) => (
-                  <VerificationItem key={item.id} item={item} onDecision={handleDecision} />
+                  <VerificationItem
+                    key={item.id}
+                    item={item}
+                    onDecision={handleDecision}
+                    actionLoading={actionLoading[item.id]}
+                  />
                 ))
               ) : (
                 <div className="empty-state" style={{ padding: '40px 24px' }}>
@@ -466,6 +735,42 @@ function Dashboard({ user, onLogout }: { user: any; onLogout: () => void }) {
           </div>
 
         </div>
+
+        {/* ── SPONSORSHIP PROPOSALS ── */}
+        <div className="glass-card animate-slide-up" style={{ marginTop: 24, animationDelay: '300ms' }}>
+          <div style={{ padding: '20px 20px 0', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div>
+              <p style={{ fontSize: '0.625rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.12em', color: 'var(--muted-foreground)' }}>
+                Sponsor Management
+              </p>
+              <p style={{ marginTop: 4, fontSize: '1.25rem', fontWeight: 900, fontStyle: 'italic', letterSpacing: '-0.03em' }}>
+                {sponsorships.length} <span style={{ color: 'var(--muted-foreground)', fontStyle: 'normal', fontWeight: 500, fontSize: '0.75rem' }}>proposals</span>
+              </p>
+            </div>
+            <span className="badge badge-primary">
+              <Briefcase size={10} />
+              B2B Sponsors
+            </span>
+          </div>
+
+          <div style={{ marginTop: 12 }}>
+            {sponsorships.length > 0 ? (
+              sponsorships.map((s: any) => (
+                <SponsorshipRow
+                  key={s.id}
+                  item={s}
+                  onUpdateStatus={handleUpdateSponsorshipStatus}
+                  updating={updatingSponsorId === s.id}
+                />
+              ))
+            ) : (
+              <div className="empty-state" style={{ padding: '36px 20px' }}>
+                <Briefcase size={36} color="var(--muted-foreground)" style={{ margin: '0 auto 10px' }} />
+                <p>No corporate sponsorship proposals received yet.</p>
+              </div>
+            )}
+          </div>
+        </div>
       </main>
     </div>
   );
@@ -475,19 +780,16 @@ function Dashboard({ user, onLogout }: { user: any; onLogout: () => void }) {
    ROOT APP
 ══════════════════════════════════════ */
 export default function App() {
-  const [token, setToken] = useState<string>(localStorage.getItem('adminToken') || '');
-  const [user, setUser] = useState<any>(() => {
-    try { return JSON.parse(localStorage.getItem('adminUser') || 'null'); } catch { return null; }
-  });
+  const [token, setToken] = useState<string>(getAdminToken() || '');
+  const [user, setUser] = useState<User | null>(() => getAdminUser());
 
-  const handleLogin = (t: string, u: any) => {
+  const handleLogin = (t: string, u: User) => {
     setToken(t);
     setUser(u);
   };
 
   const handleLogout = () => {
-    localStorage.removeItem('adminToken');
-    localStorage.removeItem('adminUser');
+    clearAdminAuth();
     setToken('');
     setUser(null);
   };

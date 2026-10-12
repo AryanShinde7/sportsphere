@@ -5,9 +5,8 @@ import {
   StatusBar, Image, Platform, Dimensions
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { router } from 'expo-router';
-import axios from 'axios';
-import { API_URL, Storage } from '../utils/config';
+import { router, useFocusEffect } from 'expo-router';
+import { mobileApi, Storage } from '../utils/config';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -181,6 +180,12 @@ export default function DashboardScreen() {
     loadUserData();
   }, []);
 
+  useFocusEffect(
+    useCallback(() => {
+      fetchAthletes();
+    }, [])
+  );
+
   useEffect(() => {
     let result = athletes;
     if (activeSport !== 'All') result = result.filter(a => a.sport?.name === activeSport);
@@ -199,10 +204,10 @@ export default function DashboardScreen() {
 
   const fetchAthletes = async () => {
     try {
-      const res = await axios.get(`${API_URL}/athletes`);
-      setAthletes(res.data);
-      setFiltered(res.data);
-      const unique = [...new Set(res.data.map((a: any) => a.sport?.name).filter(Boolean))] as string[];
+      const data = await mobileApi.athletes.getAll();
+      setAthletes(data);
+      setFiltered(data);
+      const unique = [...new Set(data.map((a: any) => a.sport?.name).filter(Boolean))] as string[];
       setSports(unique);
     } catch (err) { 
       console.error('Fetch athletes error:', err); 
