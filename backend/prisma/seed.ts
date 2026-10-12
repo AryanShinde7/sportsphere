@@ -18,6 +18,7 @@ async function main() {
   await prisma.budgetItem.deleteMany();
   await prisma.supportRequest.deleteMany();
   await prisma.achievement.deleteMany();
+  await prisma.mediaAsset.deleteMany();
   await prisma.sponsorshipInterest.deleteMany();
   await prisma.sponsorProfile.deleteMany();
   await prisma.athleteProfile.deleteMany();
@@ -103,6 +104,7 @@ async function main() {
           discipline: '400m Sprint',
           state: 'Maharashtra',
           city: 'Mumbai',
+          headline: 'Maharashtra State 400m Silver Medalist | Target: National Junior Championship 2026',
           bio: 'State-level sprinter training under Coach Rajesh Yadav at Mumbai Athletics Academy. 4 years competitive experience. Aiming to break 48s in the 400m and qualify for nationals.',
           coachName: 'Rajesh Yadav',
           academyName: 'Mumbai Athletics Academy',
@@ -128,6 +130,7 @@ async function main() {
           discipline: '200m Freestyle',
           state: 'Kerala',
           city: 'Thiruvananthapuram',
+          headline: 'Kerala State Aquatics Gold + National Junior Bronze | Target: Asian Games 2026',
           bio: 'National-level freestyle swimmer. Gold medalist at Kerala State Aquatics Championship. Training at SAI Trivandrum centre with a vision to represent India at Asian Games.',
           coachName: 'Sunitha Rao',
           academyName: 'SAI Trivandrum Aquatics',
@@ -153,6 +156,7 @@ async function main() {
           discipline: 'Freestyle 74kg',
           state: 'Haryana',
           city: 'Sonipat',
+          headline: 'Sonipat District Wrestling Gold | Chhatrasal Tradition | Target: Haryana State Championship',
           bio: "District champion wrestler from Sonipat's wrestling heartland. Training at the legendary Chhatrasal Akhada tradition. Focused on qualifying for state-level tournaments.",
           coachName: 'Mahavir Phogat Jr.',
           academyName: 'Sonipat Wrestling Centre',
@@ -178,6 +182,7 @@ async function main() {
           discipline: "Women's Singles",
           state: 'Telangana',
           city: 'Hyderabad',
+          headline: 'Gopichand Academy Trainee | Telangana State Semifinalist | Target: All India Junior Rankings',
           bio: "Rising star in Hyderabad's badminton circuit. Trained at the Pullela Gopichand Academy feeder program. Consistent top-4 finishes at state-level tournaments.",
           coachName: 'Sai Praneeth B.',
           academyName: 'Gopichand Badminton Academy',
@@ -203,6 +208,7 @@ async function main() {
           discipline: 'Light Welterweight 63.5kg',
           state: 'Rajasthan',
           city: 'Jaipur',
+          headline: 'National Boxing Bronze Medalist | Rajasthan State Gold | Target: Olympic Qualification',
           bio: 'National bronze medalist in boxing. Trains at Army Sports Institute feeder program. Known for aggressive counter-punching style. Dreams of Olympic qualification.',
           coachName: 'Bhiwani Boxing Club Coach',
           academyName: 'Rajasthan Boxing Association',
@@ -228,6 +234,7 @@ async function main() {
           discipline: '10m Air Rifle',
           state: 'Madhya Pradesh',
           city: 'Bhopal',
+          headline: 'MP State Shooting Silver | 10m Air Rifle Specialist | Inspired by Abhinav Bindra',
           bio: "Precision shooter specializing in 10m Air Rifle. Silver medalist at MP State Shooting Championship. Inspired by Abhinav Bindra's Olympic gold.",
           coachName: 'Jaspal Rana Academy Coach',
           academyName: 'MP State Shooting Academy',
@@ -253,6 +260,7 @@ async function main() {
           discipline: '67kg Category',
           state: 'Manipur',
           city: 'Imphal',
+          headline: 'NE Zone Weightlifting Gold | 67kg | Following Manipur\'s Olympic Lifting Legacy',
           bio: 'Following the proud tradition of Manipuri weightlifting. Gold at NE Zone championship. Training to break the junior national record in clean & jerk.',
           coachName: 'Kunjarani Devi',
           academyName: 'Manipur Weightlifting Centre',
@@ -278,6 +286,7 @@ async function main() {
           discipline: 'Recurve Bow',
           state: 'Jharkhand',
           city: 'Ranchi',
+          headline: 'Tata Archery Academy | Ranchi District Gold | First from Village to Compete at District Level',
           bio: "Tribal archer from Jharkhand, continuing the state's rich tradition in archery. Trained under Tata Archery Academy's grassroots program. First in her village to compete at district level.",
           coachName: "Deepika Kumari's School Coach",
           academyName: 'Tata Archery Academy',
@@ -303,6 +312,7 @@ async function main() {
           discipline: "Men's Singles",
           state: 'Gujarat',
           city: 'Ahmedabad',
+          headline: 'Gujarat State Table Tennis Champion | Topspin Specialist | NIT Surat Scholar-Athlete',
           bio: 'Gujarat state champion in table tennis. Known for his topspin forehand. Balancing competitive sports with engineering studies at NIT Surat.',
           coachName: 'Sharath Kamal Academy Coach',
           academyName: 'Gujarat TT Association',
@@ -328,6 +338,7 @@ async function main() {
           discipline: 'Raider',
           state: 'Tamil Nadu',
           city: 'Chennai',
+          headline: 'TN State Kabaddi Champion | Best Raider Awardee | Target: Pro Kabaddi League Season 12',
           bio: 'Explosive raider from Chennai. State-level kabaddi champion. Dreams of making it to the Pro Kabaddi League. Known for his agility and do-or-die raids.',
           coachName: 'PKL Level Coach',
           academyName: 'Tamil Nadu Kabaddi Academy',
@@ -594,9 +605,41 @@ async function main() {
     });
   }
 
+  // =============================================
+  // PHASE 7B: MEDIA ASSETS (Avatars, Banners, Gallery)
+  // Using Unsplash public CDN URLs — no auth needed for demo
+  // =============================================
+  console.log('📸 Seeding athlete media assets...');
+
+  const athletes = [
+    { profile: aarav.athleteProfile!, sport: 'athletics',     avatar: 'https://images.unsplash.com/photo-1567427017947-545c5f8d16ad?w=400&q=80', banner: 'https://images.unsplash.com/photo-1527090526205-beaac8dc3c62?w=1200&q=80', gallery: ['https://images.unsplash.com/photo-1461896836934-ffe607ba8211?w=600&q=80', 'https://images.unsplash.com/photo-1587280501635-68a0e82cd5ff?w=600&q=80'] },
+    { profile: diya.athleteProfile!,  sport: 'swimming',     avatar: 'https://images.unsplash.com/photo-1560089000-7433a4ebbd64?w=400&q=80', banner: 'https://images.unsplash.com/photo-1519315901367-f34ff9154487?w=1200&q=80', gallery: ['https://images.unsplash.com/photo-1530549387789-4c1017266635?w=600&q=80', 'https://images.unsplash.com/photo-1571902943202-507ec2618e8f?w=600&q=80'] },
+    { profile: rohan.athleteProfile!, sport: 'wrestling',    avatar: 'https://images.unsplash.com/photo-1566492031773-4f4e44671857?w=400&q=80', banner: 'https://images.unsplash.com/photo-1549719386-74dfcbf7dbed?w=1200&q=80', gallery: ['https://images.unsplash.com/photo-1530655638484-b7f59d2a4b0f?w=600&q=80'] },
+    { profile: ananya.athleteProfile!,sport: 'badminton',    avatar: 'https://images.unsplash.com/photo-1609710228159-0fa9bd7c0827?w=400&q=80', banner: 'https://images.unsplash.com/photo-1626224583764-f87db24ac4ea?w=1200&q=80', gallery: ['https://images.unsplash.com/photo-1599474924187-334a4ae5bd3c?w=600&q=80', 'https://images.unsplash.com/photo-1501854140801-50d01698950b?w=600&q=80'] },
+    { profile: vikram.athleteProfile!,sport: 'boxing',       avatar: 'https://images.unsplash.com/photo-1552072092-7f9b8d63efcb?w=400&q=80', banner: 'https://images.unsplash.com/photo-1517649763962-0c623066013b?w=1200&q=80', gallery: ['https://images.unsplash.com/photo-1607962837359-5e7e89f86776?w=600&q=80', 'https://images.unsplash.com/photo-1591117207239-788bf8de6c3b?w=600&q=80'] },
+    { profile: meera.athleteProfile!, sport: 'shooting',     avatar: 'https://images.unsplash.com/photo-1594608661623-aa0bd3a69d98?w=400&q=80', banner: 'https://images.unsplash.com/photo-1612872087720-bb876e2e67d1?w=1200&q=80', gallery: ['https://images.unsplash.com/photo-1598300042247-d088f8ab3a91?w=600&q=80'] },
+    { profile: arjun.athleteProfile!, sport: 'weightlifting',avatar: 'https://images.unsplash.com/photo-1583454110551-21f2fa2afe61?w=400&q=80', banner: 'https://images.unsplash.com/photo-1534438327276-14e5300c3a48?w=1200&q=80', gallery: ['https://images.unsplash.com/photo-1526506118085-60ce8714f8c5?w=600&q=80', 'https://images.unsplash.com/photo-1574680173144-9d3b5b200f30?w=600&q=80'] },
+    { profile: priyaA.athleteProfile!,sport: 'archery',      avatar: 'https://images.unsplash.com/photo-1551698618-1dfe5d97d256?w=400&q=80', banner: 'https://images.unsplash.com/photo-1600456899121-68eda5705257?w=1200&q=80', gallery: ['https://images.unsplash.com/photo-1592656094267-764a45160876?w=600&q=80'] },
+    { profile: karan.athleteProfile!, sport: 'table tennis', avatar: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=400&q=80', banner: 'https://images.unsplash.com/photo-1558618666-fcd25c85cd64?w=1200&q=80', gallery: ['https://images.unsplash.com/photo-1611251135345-18c56206b863?w=600&q=80'] },
+    { profile: suresh.athleteProfile!,sport: 'kabaddi',      avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=400&q=80', banner: 'https://images.unsplash.com/photo-1523050854058-8df90110c9f1?w=1200&q=80', gallery: ['https://images.unsplash.com/photo-1546519638-68e109498ffc?w=600&q=80'] },
+  ];
+
+  for (const a of athletes) {
+    // AVATAR
+    await prisma.mediaAsset.create({ data: { athleteId: a.profile.id, type: 'AVATAR', url: a.avatar, order: 0 } });
+    // BANNER
+    await prisma.mediaAsset.create({ data: { athleteId: a.profile.id, type: 'BANNER', url: a.banner, order: 0 } });
+    // GALLERY
+    for (let i = 0; i < a.gallery.length; i++) {
+      await prisma.mediaAsset.create({ data: { athleteId: a.profile.id, type: 'GALLERY', url: a.gallery[i], order: i } });
+    }
+  }
+
   console.log('✅ Seed completed!');
   console.log('   Created: 10 athletes, 15 achievements, 10 support requests');
   console.log('   Created: Verification records (IDENTITY, AFFILIATION, ACHIEVEMENT, SUPPORT_NEED)');
+  console.log('   Created: MediaAssets — AVATAR + BANNER + GALLERY for all 10 athletes');
+  console.log('   Created: Headlines for all 10 athlete profiles');
   console.log('   Pending review items: 2 achievements, 2 support needs, 1 identity, 1 affiliation');
   console.log('');
   console.log('Demo accounts (all use password: password123):');

@@ -5,6 +5,10 @@ import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
+import multer from 'multer';
+import path from 'path';
+import fs from 'fs';
+import { v4 as uuidv4 } from 'uuid';
 
 dotenv.config();
 
@@ -16,6 +20,32 @@ const MOCK_WEBHOOK_SECRET = process.env.MOCK_WEBHOOK_SECRET || 'sportsphere_mock
 
 app.use(cors());
 app.use(express.json());
+
+// --- Static file serving for uploaded athlete media ---
+const UPLOADS_DIR = path.join(__dirname, '..', 'uploads');
+if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+app.use('/uploads', express.static(UPLOADS_DIR));
+
+// --- Multer config: disk storage, UUID filenames, image-only validation ---
+const storage = multer.diskStorage({
+  destination: (_req, _file, cb) => cb(null, UPLOADS_DIR),
+  filename: (_req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+    cb(null, `${uuidv4()}${ext}`);
+  },
+});
+const upload = multer({
+  storage,
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5 MB max
+  fileFilter: (_req, file, cb) => {
+    const allowed = ['image/jpeg', 'image/png', 'image/webp'];
+    if (allowed.includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only JPEG, PNG, and WebP images are allowed'));
+    }
+  },
+});
 
 // --- Authentication Middleware ---
 const authenticateToken = (req: any, res: any, next: any) => {
@@ -82,6 +112,27 @@ async function hydrateVerification(v: any) {
 function generateMockId(prefix: string): string {
   return `${prefix}_${crypto.randomBytes(8).toString('hex')}`;
 }
+
+// ===================================================================
+// FILE UPLOAD ROUTE (Phase 7A)
+// ===================================================================
+
+// POST /api/upload — accepts a single image file, returns its URL
+app.post('/api/upload', authenticateToken, upload.single('file'), (req: any, res: any) => {
+  if (!req.file) {
+    return res.status(400).json({ error: 'No file uploaded or invalid file type' });
+  }
+  const url = `/uploads/${req.file.filename}`;
+  return res.json({ url, filename: req.file.filename });
+});
+
+// Error handler for multer (e.g. file too large, wrong type)
+app.use((err: any, _req: any, res: any, next: any) => {
+  if (err instanceof multer.MulterError || err.message?.includes('Only')) {
+    return res.status(400).json({ error: err.message });
+  }
+  next(err);
+});
 
 // ===================================================================
 // AUTH ROUTES
@@ -168,6 +219,7 @@ app.get('/api/athletes', async (req, res) => {
         user: { select: { name: true } },
         sport: true,
         achievements: true,
+        mediaAssets: { orderBy: { order: 'asc' } },
         supportRequests: {
           where: { lifecycleStatus: 'ACTIVE' }
         }
@@ -231,8 +283,16 @@ app.get('/api/athletes/:id', async (req, res) => {
         user: { select: { name: true } },
         sport: true,
         achievements: true,
+        mediaAssets: { orderBy: { order: 'asc' } },
         supportRequests: {
-          include: { budgetItems: true }
+          include: {
+            budgetItems: true,
+            supports: {
+              take: 5,
+              orderBy: { createdAt: 'desc' },
+              include: { supporter: { select: { name: true } } }
+            }
+          }
         }
       }
     });

@@ -37,16 +37,20 @@ model AthleteProfile {
   city                      String?
   state                     String?
   bio                       String?
+  headline                  String?  // e.g. "National U-19 400m Gold Medalist | Target: 2028 Olympics"
   coachName                 String?
   academyName               String?
   currentGoal               String?
-  publicVerificationSummary String? // DEPRECATED: verification now computed from Verification table. Kept for backward compat.
+  publicVerificationSummary String?  // DEPRECATED: verification now computed from Verification table. Kept for backward compat.
   createdAt                 DateTime @default(now())
   updatedAt                 DateTime @updatedAt
 
   achievements         Achievement[]
   supportRequests      SupportRequest[]
   sponsorshipInterests SponsorshipInterest[]
+  mediaAssets          MediaAsset[]
+  milestones           CareerMilestone[]
+  posts                Post[]
 }
 
 model SponsorProfile {
@@ -209,4 +213,54 @@ model AuditLog {
   entityId   Int
   details    String?  // JSON with before/after or contextual notes
   createdAt  DateTime @default(now())
+}
+
+// ── Phase 7A: Athlete media assets (avatars, banners, gallery) ──
+// Stored as a relation table (not a JSON blob) so assets are queryable,
+// orderable, and can be efficiently filtered by type.
+model MediaAsset {
+  id        Int            @id @default(autoincrement())
+  athleteId Int
+  athlete   AthleteProfile @relation(fields: [athleteId], references: [id])
+  type      String         // "AVATAR" | "BANNER" | "GALLERY"
+  url       String
+  order     Int            @default(0)
+  createdAt DateTime       @default(now())
+}
+
+// ── Phase 8A: Career timeline milestones ──
+model CareerMilestone {
+  id             Int            @id @default(autoincrement())
+  athleteId      Int
+  athlete        AthleteProfile @relation(fields: [athleteId], references: [id])
+  year           Int
+  title          String
+  result         String?        // e.g. "Gold Medal — 46.8s"
+  level          String         // "DISTRICT" | "STATE" | "NATIONAL" | "INTERNATIONAL"
+  certificateUrl String?
+  createdAt      DateTime       @default(now())
+}
+
+// ── Phase 8A: Athlete update posts ──
+// cheerCount is NOT stored as an integer to avoid write race conditions.
+// Cheer count is computed at query time with _count.cheers.
+model Post {
+  id        Int            @id @default(autoincrement())
+  athleteId Int
+  athlete   AthleteProfile @relation(fields: [athleteId], references: [id])
+  content   String
+  mediaUrl  String?
+  createdAt DateTime       @default(now())
+  cheers    Cheer[]
+}
+
+// ── Phase 8A: One cheer per user per post (relation table, not integer counter) ──
+// @@unique enforces the business rule at the database level.
+model Cheer {
+  id        Int      @id @default(autoincrement())
+  postId    Int
+  post      Post     @relation(fields: [postId], references: [id])
+  userId    Int
+  createdAt DateTime @default(now())
+  @@unique([postId, userId])
 }
