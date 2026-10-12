@@ -1,64 +1,55 @@
-# SportSphere Agent Execution Roadmap
+# SportSphere 2.0 Execution Roadmap — "The LinkedIn for Indian Athletes"
 
-> **North Star**: Verified Indian athlete discovery and micro-funding platform.
+> **North Star**: The premier professional identity, discovery, and verified micro-funding platform for Indian athletes.
 >
-> **Core Slice**: Login -> Browse athletes -> View verified athlete profile and budget -> Back athlete or submit sponsorship interest -> Admin verifies and tracks.
+> **Core Vision**: Like LinkedIn connects professionals with opportunities, SportSphere connects emerging Indian sports talent with individual backers, coaches, brands, and CSR sponsors — backed by verified credentials, media-rich athlete profiles, and real-time funding.
 
-This document is meant to be read by coding agents and team members before they touch the project. It is not a feature wishlist. It is an execution plan for stabilizing the existing project without creating avoidable conflicts.
+This document is the single source of truth for all agents and team members. Read it in full before touching any file. Update it after every meaningful change.
 
 ---
 
-## 0. How To Use This Roadmap
+## 0. How to Use This Roadmap
 
 Before starting work, every agent must:
 
 1. Read the **Current State Ledger**.
-2. Check the **Known Issues** table.
-3. Claim one phase or subphase.
-4. Stay inside the listed file scope.
-5. Stop and record a blocker if work requires files outside the allowed scope.
-6. Update this file after completing work.
+2. Read the **Conflict-Avoidance Rules**.
+3. Claim exactly one phase or sub-phase. Do not claim multiple.
+4. Stay inside the listed file scope for your phase.
+5. Stop and record a blocker if work requires files outside your allowed scope.
+6. Update the **Progress Log**, **Decision Log**, and this ledger after completing work.
 
 Do not silently expand scope. Silent scope expansion is how agents create merge conflicts and hidden bugs.
 
 ---
 
-## 1. Current State Ledger
-
-Update this section whenever project state changes.
+## 1. Current State Ledger (v2.0)
 
 | Field | Current Value |
 |:---|:---|
-| Active Phase | **Completed (Phases 0–6 Stabilized & Verified)** |
-| Last Updated | 2026-10-12 |
-| Backend Runtime Source | **Resolved**: `backend/src/index.ts` via `tsx` |
-| Seed Source | **Resolved**: `backend/prisma/seed.ts` via `tsx` |
-| Last Known Good Demo Flow | **Verified End-to-End** (Supporter micro-fund -> Sponsor proposal -> Admin review -> Persistence across reloads) |
-| Backend Verified | **Yes** — all contracts verified and passing |
-| Admin Web Verified | **Yes** — builds cleanly (`npm run build` ✓); verification & sponsorship actions persist |
-| Mobile App Verified | **Yes** — typecheck passes (`npx tsc --noEmit` ✓); support & sponsorship flows persist |
-| Support Flow Persists | **Yes** — live supporter contribution persists to SQLite and updates on focus ✓ |
-| Sponsorship Flow Persists | **Yes** — mobile proposal submission & admin status update both persist ✓ |
+| **Roadmap Version** | **2.0 (Expansion & Professional Network Phase)** |
+| **Foundation Status** | **Completed & Stabilized** (Phases 0–6 verified end-to-end) |
+| **Active Target Phase** | **Phase 7A: Schema + Media Upload Backend** |
+| **Backend Runtime** | Canonical `backend/src/index.ts` via `tsx` |
+| **Database** | SQLite `backend/prisma/dev.db` via Prisma ORM |
+| **Client Platforms** | Mobile (Expo / React Native) & Admin Web (Vite / React) |
+| **Payment Status** | Functional sandbox/ledger persistence; Live Razorpay Gateway planned for Phase 9 |
+| **Expo Mode** | Standard Expo Go (SDK 50+). Phase 9B will require `expo-dev-client` — native module needed. |
+| **Last Updated** | 2026-10-12 |
 
 ---
 
-## 2. Known Issues And Blockers
+## 2. Foundation Retrospective (Phases 0–6 — All Completed)
 
-Keep this table current. If an issue is fixed, change status and add a short note in the Progress Log.
-
-| ID | Issue | Impact | Priority | Status |
-|:---|:---|:---|:---|:---|
-| **P-001** | Dual backend entry files: `backend/src/index.ts` and `backend/src/index.js`. | Agents may edit a file that is not running. | Critical | **Fixed** — `index.js` deprecated with header; `index.ts` is canonical |
-| **P-002** | `backend/package.json` currently runs `node src/index.js`. | TypeScript routes may not execute. | Critical | **Fixed** — `dev` script now runs `tsx src/index.ts` |
-| **P-003** | Dual seed files: `backend/prisma/seed.ts` and `backend/prisma/seed.js`. | Demo data can become inconsistent. | High | **Fixed** — `seed.js` deprecated; `seed.ts` now has full rich demo data |
-| **P-004** | Admin Approve/Reject appears to update local React state only. | Verification decisions may be lost on refresh. | Critical | **Fixed** — Connected to `adminApi.approveVerification` and `adminApi.rejectVerification`, added loading spinners, error alerts, and automatic dashboard refetch. Decisions persist in DB. |
-| **P-005** | Mobile support screen can show success even when API call fails. | Fake payment/support demo. | Critical | **Fixed** — Removed fake success fallback; wired to `mobileApi.support.supportDirect`, handles errors honestly with error banner, attached Bearer token, and auto-refreshes athlete/feed progress on focus. Verified DB persistence (5200 -> 6200). |
-| **P-006** | Mobile app needs consistent `Authorization: Bearer <token>` handling. | Protected endpoints can fail unexpectedly. | High | **Fixed** — `mobile-app/src/utils/config.ts` now provides `apiClient` with async Bearer token interceptor and typed `mobileApi`. |
-| **P-007** | Sponsor interest UI is missing/incomplete. | Sponsor discovery loop is incomplete. | Medium | **Fixed** — Added corporate sponsorship form to mobile `athlete/[id].tsx` with validation, type chips, and `mobileApi.sponsorship.createInterest`. |
-| **P-008** | Admin sponsorship review UI is not confirmed wired. | Admin cannot action sponsor proposals. | Medium | **Fixed** — Added Sponsor Management card to `admin-web/src/App.tsx` displaying all proposals with live Review, Accept, and Decline status updating. |
-| **P-009** | Evidence upload/storage is not implemented. | Verification documents are not real yet. | Low | Deferred |
-| **P-010** | README and setup instructions are minimal. | New agents waste time guessing how to run the project. | High | **Fixed** — Comprehensive README created with quickstart commands, demo accounts, architecture map, contract matrix, and presentation script. |
-| **P-011** | Automated test coverage is missing or unconfirmed. | Regressions are likely during parallel work. | Medium | **Fixed** — End-to-end CLI & REST test scripts verified live across auth, funding, verification, and sponsorship flows. |
+| Phase | Goal | Status |
+|:---|:---|:---|
+| Phase 0 | Backend runtime canonicalized; `index.ts` + `seed.ts` as single sources of truth | ✅ Done |
+| Phase 1 | All REST contracts verified across Auth, Discovery, Funding, Admin, and Sponsorship | ✅ Done |
+| Phase 2 | Centralized Axios clients with automatic Bearer token interceptors on both platforms | ✅ Done |
+| Phase 3 | Admin verification actions live-wired to database; approve/reject persist across reload | ✅ Done |
+| Phase 4 | Mobile micro-funding flow wired honestly; auto-refreshing progress on screen focus | ✅ Done |
+| Phase 5 | Corporate sponsorship proposal loop complete: mobile submission → admin review → persist | ✅ Done |
+| Phase 6 | QA completed; builds passing (`npm run build`, `tsc --noEmit`); README runbook written | ✅ Done |
 
 ---
 
@@ -66,634 +57,690 @@ Keep this table current. If an issue is fixed, change status and add a short not
 
 These rules matter more than speed.
 
-1. **Shared files are handled first and serially.**
-   Files like `package.json`, backend entrypoints, seed files, `admin-web/src/App.tsx`, and mobile API config are high-conflict files. Do not let multiple agents edit them at the same time.
+1. **One agent, one sub-phase.** Never let two agents claim the same sub-phase. Sub-phases within the same parent phase may run in parallel only when their file scopes are completely disjoint.
 
-2. **One phase owns one integration point.**
-   If a phase touches `App.tsx`, no other phase should touch `App.tsx` until that work is merged or abandoned.
+2. **Backend schema changes are always serial.** `backend/prisma/schema.prisma` is a single-owner file. No two agents may touch it simultaneously. This is the highest-conflict file in the project.
 
-3. **Parallel work is allowed only when file scopes do not overlap.**
-   For example, backend route verification and mobile UI edits should not run in parallel if the mobile agent needs backend changes.
+3. **Migration before seeding.** Any schema change must be followed by `npx prisma migrate dev --name <description>` before re-seeding. Never re-seed against a stale schema.
 
-4. **Backend contract changes must happen before frontend wiring.**
-   Frontend agents should not guess request bodies or response shapes.
+4. **Backend contracts lock before frontend wiring.** A frontend agent must not guess endpoint request/response shapes. Wait for the backend sub-phase Done Gate before writing client code against it.
 
-5. **No fake success states.**
-   If the backend fails, the UI must show failure.
+5. **No new feature families across active sub-phases.** If Phase 7A is in progress, do not begin Phase 7C. Sub-phases sequence serially within a phase unless scopes are explicitly verified as non-overlapping.
 
-6. **No new feature families until stabilization is complete.**
-   Social features, chat, recommendations, upload storage, production payments, and full dashboards are explicitly out of scope.
+6. **No fake success states.** If a backend call fails, the UI must show failure. This rule is permanent.
 
-7. **Merge serially.**
-   Agents may implement in parallel only where allowed, but changes should be merged/reviewed one at a time.
+7. **Merge serially.** Parallel development is allowed only where scopes allow it, but changes must be reviewed and merged one sub-phase at a time.
 
 ---
 
-## 4. File Ownership Map
+## 4. Migration Strategy Protocol
 
-Use this to avoid conflicts.
-
-| Area | High-Conflict Files | Owner Phase | Notes |
-|:---|:---|:---|:---|
-| Backend runtime | `backend/package.json`, `backend/src/index.ts`, `backend/src/index.js` | Phase 0 | Serial only |
-| Seed data | `backend/prisma/seed.ts`, `backend/prisma/seed.js`, `backend/prisma/schema.prisma` | Phase 0 / Phase 1 | Serial only |
-| Admin shell | `admin-web/src/App.tsx` | Phase 3, then Phase 5 | Do not let two agents edit this at once |
-| Admin styling | `admin-web/src/index.css`, `admin-web/src/App.css` | Phase 6 | Avoid polish before behavior works |
-| Mobile API config | `mobile-app/src/utils/config.ts` | Phase 2 | Must be stable before protected calls |
-| Mobile support | `mobile-app/src/app/support/[id].tsx` | Phase 4 | Do not edit before Phase 2 |
-| Mobile athlete detail | `mobile-app/src/app/athlete/[id].tsx` | Phase 5 | Sponsor UI goes here |
-| Docs/runbook | `README.md`, this file | Phase 0 / Phase 6 | Update when commands or flow change |
-
----
-
-## 5. Phase Graph
-
-Use this dependency order:
+Every schema change from Phase 7 onward must follow this protocol exactly:
 
 ```text
-Phase 0
-  -> Phase 1
-    -> Phase 2
-      -> Phase 3
-      -> Phase 4
-        -> Phase 5
-          -> Phase 6
+1. Edit backend/prisma/schema.prisma
+2. Run: npx prisma migrate dev --name <phase>-<description>
+   e.g.: npx prisma migrate dev --name phase-7a-media-asset-table
+3. Verify migration file created under backend/prisma/migrations/
+4. Re-seed: npx tsx backend/prisma/seed.ts
+5. Smoke-test 2–3 affected API endpoints before marking sub-phase done
 ```
 
-Phase 3 and Phase 4 may run in parallel only after Phase 2 is complete and only if their file scopes do not overlap.
+**Rules for new schema fields on existing tables:**
+- All new columns on existing populated tables must be **nullable** (`?`) or carry a **default value**.
+- A non-null column without a default on a table with existing rows will fail the Prisma migration.
+- New standalone models (`MediaAsset`, `CareerMilestone`, `Post`, etc.) are safe to add without this constraint.
 
 ---
 
-# Phase 0: Runtime Source Of Truth
+## 5. Product Pillars for SportSphere 2.0
 
-## Goal
+### Pillar 1: Professional Identity
+- Media-rich profiles: avatars, banner covers, action galleries.
+- Professional headline: *"National U-19 400m Gold Medalist | Target: 2028 Olympics"*.
+- Career timeline: District → State → National → International.
+- Verified credentials with "Federation Verified" badge.
+- Coach endorsements as high-trust sponsor signals.
 
-Make sure everyone edits the files that actually run.
+### Pillar 2: Transparent Real Funding
+- Live Razorpay Checkout: UPI (GPay, PhonePe, Paytm), Cards, Netbanking.
+- HMAC SHA256 webhook signature verification before crediting any payment.
+- Animated live funding progress bars with milestone indicators.
+- Public Wall of Backers with supporter names and cheer notes.
 
-## Why This Comes First
+### Pillar 3: Dynamic Updates & Social Proof
+- Athlete training logs and competition announcements as lightweight posts.
+- One-tap Cheer reaction with real-time counter (race-condition-safe via relation table).
+- Post-funding evidence receipts showing fund utilization.
 
-Nothing else is safe until the backend entrypoint and seed entrypoint are unambiguous.
+---
 
-## Owner
-
-Backend/Foundation agent only.
-
-## Allowed Scope
+## 6. Phase Graph (v2.0)
 
 ```text
-backend/package.json
-backend/src/index.ts
-backend/src/index.js
-backend/prisma/seed.ts
-backend/prisma/seed.js
-README.md
+Phase 7A: Backend Media Schema + Upload Endpoint
+  └── Phase 7B: Seed Photo Data & URL Hydration
+        └── Phase 7C: Mobile Feed & Profile Visual Redesign
+
+Phase 8A: Career Milestone & Post Schema + API
+  └── Phase 8B: Mobile Feed Tabs (Athletes | Updates)
+        └── Phase 8C: Career Timeline on Athlete Profile
+
+Phase 9A: Backend Real Razorpay Order + HMAC Verify
+  └── Phase 9B: Mobile Razorpay Native Checkout    ← REQUIRES expo-dev-client (see Blocker Log)
+        └── Phase 9C: Animated Progress Bar + Backers Wall
+
+Phase 10A: Athlete Profile Edit API
+  └── Phase 10B: Mobile Campaign Creator Wizard + Profile Studio
+
+Phase 11A: Coach Endorsement Schema + API
+  └── Phase 11B: Mobile Endorsement Display + Cheer System
+```
+
+Phases 7 → 8 → 9 → 10 → 11 are strictly sequential. Within each phase, sub-phases A → B → C are sequential.
+
+---
+
+## 7. Strict Non-Goals (Do Not Build During Phases 7–11)
+
+Do not build these unless a phase explicitly names them:
+
+```text
+- Real-time websocket notifications (no Socket.io or SSE)
+- Direct messaging / DM / group chat between users
+- AI athlete ranking or recommendation engine
+- Cloud object storage (S3 / R2 / GCS) — use local static file serving for now
+- App Store / Play Store packaging or production EAS builds
+- Full sponsor analytics dashboard
+- Public marketing landing page
+- Stripe or any gateway other than Razorpay
+- Automated test suites (manual CLI smoke tests are acceptable)
+- Admin RBAC / granular role-based permission system
+```
+
+---
+
+# Phase 7A: Backend Media Schema + Upload Endpoint
+
+## Goal
+Establish the data model and backend file-serving infrastructure for athlete media. Nothing frontend happens until this Done Gate passes.
+
+## Owner
+Backend agent only.
+
+## Allowed Scope
+```text
+backend/prisma/schema.prisma
+backend/prisma/migrations/**
+backend/src/**
+backend/uploads/**          (create dir; add to .gitignore)
 SPORTSPHERE_EXECUTION_ROADMAP.md
 ```
 
 ## Do Not Touch
-
 ```text
-admin-web/src/App.tsx
-mobile-app/src/app/**
-mobile-app/src/utils/config.ts
+mobile-app/src/**
+admin-web/src/**
 ```
 
-## Work
+## Deliverables
 
-1. Decide the backend runtime source.
-2. Prefer TypeScript if the TypeScript file has the newer routes.
-3. Update scripts so the chosen source actually runs.
-4. Decide the seed source.
-5. Make seed behavior predictable.
-6. Clearly remove, deprecate, or document duplicate JS/TS files.
-7. Add quickstart commands to README.
+1. **New `MediaAsset` relation model** — do NOT use a JSON blob on `AthleteProfile`:
+   ```prisma
+   model MediaAsset {
+     id        Int            @id @default(autoincrement())
+     athleteId Int
+     athlete   AthleteProfile @relation(fields: [athleteId], references: [id])
+     type      String         // "AVATAR" | "BANNER" | "GALLERY"
+     url       String
+     order     Int            @default(0)
+     createdAt DateTime       @default(now())
+   }
+   ```
+   > **Why a relation table, not JSON on AthleteProfile**: SQLite has no native array type. A JSON blob cannot be queried, ordered, or joined efficiently. A dedicated table is clean, indexable, and allows ordered gallery slots.
 
-Recommended direction:
+2. **Add to `AthleteProfile`** (nullable — safe for existing seeded rows):
+   - `headline String?`
+   - `mediaAssets MediaAsset[]` (back-relation)
 
-```json
-"dev": "tsx src/index.ts",
-"seed": "tsx prisma/seed.ts"
-```
+3. **Backend upload endpoint**:
+   - `POST /api/upload` — accepts `multipart/form-data`, validates MIME type (jpeg/png/webp only, max 5 MB), saves to `backend/uploads/<uuid>.<ext>`, returns `{ url: "/uploads/<filename>" }`.
+   - `GET /uploads/:filename` — static asset serving via `express.static('uploads')`.
 
-Only use a different direction if the agent verifies that the JS files are the correct canonical files.
+4. **Update athlete queries**:
+   - `GET /api/athletes` — include `mediaAssets` for each athlete.
+   - `GET /api/athletes/:id` — include `mediaAssets`.
+
+5. **Run migration**: `npx prisma migrate dev --name phase-7a-media-asset`
 
 ## Done Gate
-
-Phase 0 is complete only when:
-
-- Backend starts with one documented command.
-- Seed runs with one documented command.
-- A route change in the chosen backend source appears at runtime.
-- Demo accounts are seeded consistently.
-- Current State Ledger is updated.
+- [ ] `MediaAsset` table exists in migrated DB schema.
+- [ ] `POST /api/upload` accepts a test image and returns a `/uploads/...` URL.
+- [ ] Returned URL resolves as a static file via `GET /uploads/<filename>`.
+- [ ] `GET /api/athletes/:id` includes a `mediaAssets` array in the response.
+- [ ] `backend/uploads/` is in `.gitignore`.
+- [ ] Existing seed data loads without error post-migration.
 
 ---
 
-# Phase 1: Backend Contract Lock
+# Phase 7B: Seed Photo Data & URL Hydration
 
 ## Goal
-
-Verify the backend behavior before frontend agents wire UI to it.
-
-## Why This Comes Before UI
-
-Frontend agents should not guess endpoint behavior. Guessing creates broken UI and repeated rework.
+Populate seeded athletes with photo URLs and professional headlines so Phase 7C has real content to render.
 
 ## Owner
-
-Backend/API agent.
+Backend / Seed agent. Start only after Phase 7A Done Gate passes.
 
 ## Allowed Scope
+```text
+backend/prisma/seed.ts
+SPORTSPHERE_EXECUTION_ROADMAP.md
+```
 
+## Do Not Touch
+```text
+backend/prisma/schema.prisma   (locked after 7A)
+mobile-app/src/**
+admin-web/src/**
+```
+
+## Deliverables
+
+For each seeded athlete, create:
+- 1 `AVATAR` `MediaAsset` record — use Unsplash CDN sport URLs (publicly accessible, no auth needed for demo).
+- 1 `BANNER` `MediaAsset` record — sport-specific action background image.
+- 2–3 `GALLERY` `MediaAsset` records with incrementing `order` values.
+- A meaningful `headline` on the `AthleteProfile`.
+
+Example headlines:
+```text
+"National U-19 400m Gold Medalist | Target: 2028 Los Angeles Olympics"
+"Junior National Javelin Throw Record Holder | SAI Patiala Trainee"
+"State-Level Boxing Champion | 60kg Lightweight | Khelo India Alumnus"
+"Commonwealth Youth Games Silver Medalist | Women's Weightlifting 59kg"
+"Asian Junior Wrestling Championship Bronze | Freestyle 65kg"
+```
+
+## Done Gate
+- [ ] `GET /api/athletes` returns `mediaAssets` with at least one `AVATAR` per athlete.
+- [ ] All 10 seeded athletes have a non-null `headline`.
+- [ ] Seed runs without errors: `npx tsx backend/prisma/seed.ts`.
+
+---
+
+# Phase 7C: Mobile Feed & Profile Visual Redesign
+
+## Goal
+Redesign the discovery feed cards and athlete profile header to display photos, banners, headlines, and verification badges.
+
+## Owner
+Mobile frontend agent. Start only after Phase 7B Done Gate passes.
+
+## Allowed Scope
+```text
+mobile-app/src/app/**
+mobile-app/src/components/**   (create directory if absent)
+SPORTSPHERE_EXECUTION_ROADMAP.md
+```
+
+## Do Not Touch
 ```text
 backend/src/**
 backend/prisma/**
-README.md
+admin-web/src/**
+```
+
+## Deliverables
+
+1. **Discovery Feed Card Redesign**:
+   - Hero image (`AVATAR` or first `GALLERY` asset) as card background with a dark gradient overlay.
+   - Sport tag chip, state tag, and verified badge (if `VERIFIED`) overlaid on the card.
+   - Athlete name + `headline` in bold over the gradient.
+   - Compact funding progress bar at card bottom: *"₹X raised — N%"*.
+
+2. **Athlete Profile Header Redesign** (`athlete/[id].tsx`):
+   - Full-width `BANNER` image spanning the top of the screen.
+   - Circular `AVATAR` overlapping the banner bottom edge (LinkedIn-style offset).
+   - `headline` displayed below the athlete name.
+   - Green verified checkmark badge if any `Verification.status === "VERIFIED"`.
+   - Horizontally scrollable `GALLERY` carousel section below the bio.
+
+3. **Graceful Fallback**:
+   - Empty `mediaAssets`: render initials-based circular avatar with a sport-color gradient placeholder banner.
+   - Image load failure: `onError` handler replaces src with the initials fallback. Do not show broken image icons.
+
+## Done Gate
+- [ ] Discovery feed cards display hero athlete photos with gradient overlay.
+- [ ] Athlete profile renders banner + overlapping circular avatar + headline.
+- [ ] Gallery carousel renders when `GALLERY` assets are present.
+- [ ] Initials fallback renders cleanly when media is absent or fails to load.
+- [ ] `npx tsc --noEmit` passes with no new errors.
+
+---
+
+# Phase 8A: Career Milestone & Post Schema + API
+
+## Goal
+Lock the data models and API contracts for career milestones and athlete update posts before any mobile UI work begins.
+
+## Owner
+Backend agent. Start after Phase 7C Done Gate passes.
+
+## Allowed Scope
+```text
+backend/prisma/schema.prisma
+backend/prisma/migrations/**
+backend/src/**
 SPORTSPHERE_EXECUTION_ROADMAP.md
 ```
 
-## Do Not Touch
+## Deliverables
 
-```text
-admin-web/src/**
-mobile-app/src/**
-```
+1. **`CareerMilestone` model**:
+   ```prisma
+   model CareerMilestone {
+     id             Int            @id @default(autoincrement())
+     athleteId      Int
+     athlete        AthleteProfile @relation(fields: [athleteId], references: [id])
+     year           Int
+     title          String
+     result         String?        // "Gold Medal — 46.8s"
+     level          String         // "DISTRICT" | "STATE" | "NATIONAL" | "INTERNATIONAL"
+     certificateUrl String?
+     createdAt      DateTime       @default(now())
+   }
+   ```
 
-## Contracts To Verify
+2. **`Post` and `Cheer` models** — do NOT use an integer `cheerCount` column:
+   ```prisma
+   model Post {
+     id        Int            @id @default(autoincrement())
+     athleteId Int
+     athlete   AthleteProfile @relation(fields: [athleteId], references: [id])
+     content   String
+     mediaUrl  String?
+     createdAt DateTime       @default(now())
+     cheers    Cheer[]
+   }
 
-Auth:
+   model Cheer {
+     id        Int      @id @default(autoincrement())
+     postId    Int
+     post      Post     @relation(fields: [postId], references: [id])
+     userId    Int
+     createdAt DateTime @default(now())
+     @@unique([postId, userId])
+   }
+   ```
+   > **Why a Cheer relation table, not an integer column**: A stored `cheerCount` integer is a write race condition under concurrent requests — two simultaneous increments on SQLite can collide. The relation table enforces one cheer per user per post via the unique constraint and counts safely at query time with `_count.cheers`.
 
-```text
-POST /api/auth/register
-POST /api/auth/login
-GET /api/auth/me
-```
+3. **API contracts**:
+   - `GET /api/athletes/:id/milestones` — milestones ordered by `year DESC`.
+   - `GET /api/feed/posts` — recent posts across all athletes, with `_count: { cheers: true }` and `mediaUrl`.
+   - `POST /api/posts/:id/cheer` — authenticated; upsert Cheer (idempotent, returns 200 on duplicate).
 
-Athlete discovery:
+4. Seed 2–3 milestones and 1–2 posts per athlete.
 
-```text
-GET /api/athletes
-GET /api/athletes/:id
-GET /api/support-requests/:id
-```
-
-Funding:
-
-```text
-POST /api/payments/razorpay/create-order
-POST /api/payments/razorpay/webhook
-POST /api/support-requests/:id/support
-```
-
-Admin:
-
-```text
-GET /api/admin/dashboard
-GET /api/admin/verifications/pending
-GET /api/admin/verifications
-POST /api/admin/verifications/:id/approve
-POST /api/admin/verifications/:id/reject
-POST /api/admin/verifications/:id/request-correction
-GET /api/admin/support-requests
-PUT /api/admin/support-requests/:id/approve
-GET /api/admin/sponsorship-interests
-PUT /api/admin/sponsorship-interests/:id
-GET /api/admin/audit-logs
-```
-
-## Work
-
-1. Verify request body requirements.
-2. Verify response shapes.
-3. Verify auth-protected routes reject missing tokens.
-4. Verify admin routes reject non-admin users.
-5. Verify mutation routes persist in SQLite.
-6. Fix backend bugs found during verification.
-7. Document the final API expectations in README or this file.
+5. **Run migration**: `npx prisma migrate dev --name phase-8a-milestones-posts-cheers`
 
 ## Done Gate
-
-Phase 1 is complete only when:
-
-- Login returns a usable JWT.
-- `GET /api/athletes` returns seeded athletes.
-- `GET /api/athletes/:id` returns profile, achievements, support requests, and budget items.
-- Admin verification mutations persist after refresh/re-query.
-- Support mutation or payment simulation can update `amountSupported`.
-- Sponsorship interest can be created and listed through backend routes.
-- Current State Ledger and Known Issues are updated.
+- [ ] `CareerMilestone`, `Post`, `Cheer` tables exist in migrated schema.
+- [ ] `GET /api/athletes/:id/milestones` returns seeded data.
+- [ ] `GET /api/feed/posts` returns posts with correct `cheerCount`.
+- [ ] `POST /api/posts/:id/cheer` called twice by the same user returns 200 both times (no 500, no duplicate row).
 
 ---
 
-# Phase 2: Shared Client Foundation
-
-## Goal
-
-Create stable frontend API patterns before screen-level feature work.
-
-## Why This Comes Before UI Fixes
-
-Admin and mobile should not each invent different auth and error-handling patterns.
-
-## Owners
-
-Admin frontend agent and mobile frontend agent may work in parallel because their file scopes are separate.
-
-## Phase 2A: Admin API Foundation
-
-Allowed scope:
-
-```text
-admin-web/src/**
-```
-
-Recommended work:
-
-- Centralize API base URL.
-- Centralize admin token attachment.
-- Add small helper functions for admin routes.
-- Do not redesign the dashboard yet.
-
-Avoid broad visual changes.
-
-## Phase 2B: Mobile API Foundation
-
-Allowed scope:
-
-```text
-mobile-app/src/utils/config.ts
-```
-
-Recommended work:
-
-- Add or expose a safe authenticated API helper.
-- Ensure token retrieval is consistent.
-- Ensure protected calls can attach `Authorization: Bearer <token>`.
-- Keep existing storage behavior intact unless broken.
-
-Do not edit mobile screens in this phase.
-
-## Done Gate
-
-Phase 2 is complete only when:
-
-- Admin web has a clear way to make authenticated API calls.
-- Mobile app has a clear way to make authenticated API calls.
-- Existing login/session behavior still works.
-- No screen-level feature changes are mixed into this phase.
-
----
-
-# Phase 3: Admin Verification Slice
-
-## Goal
-
-Make admin verification decisions real and persistent.
+# Phase 8B: Mobile Feed Tabs (Athletes | Updates)
 
 ## Owner
-
-Admin frontend agent.
+Mobile frontend agent. Start only after Phase 8A Done Gate passes.
 
 ## Allowed Scope
-
 ```text
-admin-web/src/App.tsx
-admin-web/src/index.css
-admin-web/src/App.css
+mobile-app/src/app/**
+mobile-app/src/components/**
 ```
 
-If backend changes are required, stop and record a blocker for the backend owner. Do not modify backend files in this phase.
+## Deliverables
 
-## Work
+1. Two-tab layout on the home/feed screen:
+   - **"Athletes"** tab — existing discovery feed from Phase 7C.
+   - **"Updates"** tab — chronological post cards from `GET /api/feed/posts`.
 
-1. Replace local-only approve/reject behavior with API calls.
-2. Add loading state per verification action.
-3. Show an error if the backend rejects the action.
-4. Refresh dashboard/pending list after successful action.
-5. Keep UI changes minimal and behavior-focused.
+2. **Post card component**: athlete circular avatar + name, post content, optional media image, cheer count, one-tap Cheer button.
+
+3. Cheer button behavior:
+   - Calls `POST /api/posts/:id/cheer` with Bearer token.
+   - Optimistically increments counter in local state.
+   - Reverts on API error (no fake persistence).
 
 ## Done Gate
-
-Phase 3 is complete only when:
-
-```text
-Admin logs in
--> pending verification list loads
--> admin approves/rejects one item
--> page refresh confirms the item stayed updated
--> pending count is correct
-```
-
-Known issue `P-004` should be marked fixed when this passes.
+- [ ] Both tabs render without crash.
+- [ ] Cheer button optimistically increments; tapping again does not double-count.
+- [ ] `npx tsc --noEmit` passes.
 
 ---
 
-# Phase 4: Mobile Support Slice
-
-## Goal
-
-Make the support/contribution flow honest and persistent.
+# Phase 8C: Career Timeline on Athlete Profile
 
 ## Owner
-
-Mobile frontend agent.
+Mobile frontend agent. Start after Phase 8B Done Gate.
 
 ## Allowed Scope
-
 ```text
-mobile-app/src/app/support/[id].tsx
 mobile-app/src/app/athlete/[id].tsx
-mobile-app/src/app/dashboard.tsx
-mobile-app/src/utils/config.ts
+mobile-app/src/components/**
 ```
 
-Only touch `config.ts` if Phase 2B did not fully solve token handling.
-
-If backend payment behavior is broken, stop and record a blocker for the backend owner.
-
-## Work
-
-1. Remove fake success on failed API calls.
-2. Attach auth token to support/payment calls.
-3. Use the verified backend route from Phase 1.
-4. For MVP, simulated payment is acceptable if it persists honestly.
-5. Refresh profile/feed state after support succeeds.
-
-Expected demo behavior:
-
-```text
-User enters amount
--> backend records contribution
--> support request amountSupported increases
--> profile/feed shows updated funding progress
-```
+## Deliverables
+- Vertical scrollable timeline section rendered below the bio.
+- Each entry: year chip on the left, level badge (color-coded: District=grey, State=blue, National=orange, International=gold), title, result string.
+- If `certificateUrl` is present, a "View Certificate →" button opens it via `expo-web-browser`.
 
 ## Done Gate
-
-Phase 4 is complete only when:
-
-```text
-Supporter logs in
--> opens athlete profile
--> contributes Rs 1,000
--> refreshes profile
--> funding progress remains increased
-```
-
-Known issues `P-005` and `P-006` should be marked fixed when this passes.
+- [ ] Timeline renders at least 2 seeded milestones per athlete in correct year-descending order.
+- [ ] Level badges are visually differentiated by color.
+- [ ] "View Certificate" button works if URL is set.
 
 ---
 
-# Phase 5: Sponsorship Interest Slice
+# Phase 9A: Backend Real Razorpay Order + HMAC Verify
 
-## Goal
+> **⚠️ Blocker: resolve the expo-dev-client decision (Blocker Log item B-001) before starting this phase.**
+> Phase 9A can proceed on the backend, but Phase 9B cannot start until the mobile build strategy is confirmed.
 
-Complete the sponsor proposal loop without building a full sponsor dashboard.
+## Owner
+Backend agent.
 
-## Why This Comes After Support
+## Allowed Scope
+```text
+backend/src/**
+backend/.env                    (add RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET — test keys only)
+SPORTSPHERE_EXECUTION_ROADMAP.md
+```
 
-Sponsorship is a second conversion path. It should not be added until the core support path is stable.
+## Deliverables
 
-## Owners
+1. `npm install razorpay` in `backend/`.
 
-Mobile frontend agent and admin frontend agent. Work should be sequenced, not simultaneous, because admin integration may touch the same admin shell file from Phase 3.
+2. Real Razorpay SDK routes (test mode):
+   - `POST /api/payments/razorpay/order` — creates real Razorpay order, returns `{ orderId, amount, currency, keyId }`.
+   - `POST /api/payments/razorpay/verify` — validates HMAC SHA256 (`razorpay_order_id + "|" + razorpay_payment_id` signed with `RAZORPAY_KEY_SECRET`). Credits `amountSupported` only after valid signature. Rejects tampered payloads with 400.
 
-## Phase 5A: Backend Route Recheck
+3. The existing `Transaction` model is correctly shaped — no schema migration required.
 
-Owner: backend/API agent.
+4. Record the chosen test key ID in the Decision Log.
 
-Allowed scope:
+## Done Gate
+- [ ] Razorpay test dashboard shows the created order after calling the order endpoint.
+- [ ] Verify endpoint returns 400 for a forged/modified payload.
+- [ ] Valid test-mode payload increments `amountSupported` and persists.
 
+---
+
+# Phase 9B: Mobile Razorpay Native Checkout
+
+> **⚠️ Cannot run in standard Expo Go.** `react-native-razorpay` is a native module. A development build via `expo-dev-client` or `expo run:android` / `expo run:ios` is required. Do not attempt this phase without resolving Blocker B-001.
+
+## Owner
+Mobile frontend agent. Start only after Phase 9A Done Gate and B-001 are resolved.
+
+## Allowed Scope
+```text
+mobile-app/src/**
+mobile-app/package.json
+mobile-app/app.json
+```
+
+## Deliverables
+
+1. `npm install react-native-razorpay` in `mobile-app/`.
+
+2. Replace `mobileApi.support.supportDirect` call flow in `support/[id].tsx` with:
+   - Step 1: `POST /api/payments/razorpay/order` → receive `orderId`.
+   - Step 2: `RazorpayCheckout.open(options)` — triggers native Razorpay payment sheet.
+   - Step 3: On `payment.success`, POST to `/api/payments/razorpay/verify`.
+   - Step 4: On `payment.error` or user cancel, show honest error banner.
+
+3. Use test UPI ID `success@razorpay` for test-mode simulation.
+
+## Done Gate
+- [ ] Razorpay checkout sheet opens on device or simulator.
+- [ ] Successful test payment calls verify endpoint and increases `amountSupported`.
+- [ ] Cancelled/failed payment shows error banner with no fake success.
+- [ ] `npx tsc --noEmit` passes.
+
+---
+
+# Phase 9C: Animated Progress Bar + Backers Wall
+
+## Owner
+Mobile frontend agent. Start after Phase 9B Done Gate.
+
+## Allowed Scope
+```text
+mobile-app/src/app/athlete/[id].tsx
+mobile-app/src/components/**
+mobile-app/babel.config.js      (only if react-native-reanimated setup requires it)
+```
+
+## Deliverables
+
+1. **Animated Progress Bar**:
+   - **First**: check `mobile-app/package.json` — if `react-native-reanimated` is already installed, use it. If not, install it and configure Babel plugin per Expo Reanimated docs.
+   - Animate bar width using `withTiming` from previous to current percentage on mount and on `amountSupported` changes.
+   - Display: `₹X raised of ₹Y · Z% · N days left`.
+   - Milestone markers at 25%, 50%, 75% if campaign has milestone targets.
+
+2. **Backers Wall**:
+   - Section below campaign description showing last 5 backers.
+   - Each row: initials avatar, supporter name (or "Anonymous"), amount contributed, optional cheer note.
+   - Verify `GET /api/athletes/:id` already returns recent `supports` with `supporter.user.name`. If not, record a backend blocker — do not patch the backend from this scope.
+
+## Done Gate
+- [ ] Progress bar animates smoothly when navigating to the profile after a contribution.
+- [ ] Backers Wall renders with at least 2 entries from seeded supporter data.
+- [ ] `npx tsc --noEmit` passes.
+
+---
+
+# Phase 10A: Athlete Profile Edit API
+
+## Owner
+Backend agent. Start after Phase 9C Done Gate passes.
+
+## Allowed Scope
 ```text
 backend/src/**
 SPORTSPHERE_EXECUTION_ROADMAP.md
 ```
 
-Verify:
+## Deliverables
 
-```text
-POST /api/athletes/:id/sponsorship-interest
-GET /api/admin/sponsorship-interests
-PUT /api/admin/sponsorship-interests/:id
-```
+1. `PUT /api/athletes/me/profile` — athlete-role JWT only. Updatable fields: `headline`, `bio`, `city`, `state`, `coachName`, `academyName`, `currentGoal`. Returns 403 if token is not the athlete's own profile.
 
-Do not change mobile/admin UI here.
+2. `PUT /api/athletes/me/avatar` — `multipart/form-data` image upload. Reuses Phase 7A upload service. Creates or replaces the `AVATAR` `MediaAsset` for this athlete.
 
-## Phase 5B: Mobile Sponsor Form
-
-Owner: mobile frontend agent.
-
-Allowed scope:
-
-```text
-mobile-app/src/app/athlete/[id].tsx
-mobile-app/src/utils/config.ts
-```
-
-Add a simple sponsor action with fields:
-
-```text
-organization name
-contact person
-support type
-proposed amount
-duration
-message
-```
-
-Do not build a sponsor dashboard.
-
-## Phase 5C: Admin Sponsorship Review
-
-Owner: admin frontend agent.
-
-Allowed scope:
-
-```text
-admin-web/src/App.tsx
-admin-web/src/index.css
-admin-web/src/App.css
-```
-
-Add the smallest useful admin view for sponsorship interests:
-
-```text
-list submitted proposals
-show athlete and sponsor
-show amount/message/status
-allow status update
-refresh after update
-```
+3. `POST /api/athletes/me/campaigns` — creates a `SupportRequest` in `DRAFT` status with nested `budgetItems`. Writes an `AuditLog` entry so admin can see the submission.
 
 ## Done Gate
-
-Phase 5 is complete only when:
-
-```text
-Sponsor logs in
--> submits sponsor interest for athlete
--> admin logs in
--> admin sees proposal
--> admin updates status
--> refresh keeps updated status
-```
-
-Known issues `P-007` and `P-008` should be marked fixed when this passes.
+- [ ] Athlete JWT updates own profile; another athlete's JWT receives 403.
+- [ ] Avatar upload creates or replaces the `AVATAR` `MediaAsset`.
+- [ ] New campaign appears under `GET /api/admin/verifications/pending`.
 
 ---
 
-# Phase 6: Demo QA, Polish, And Runbook
-
-## Goal
-
-Make the project presentation-ready without expanding scope.
+# Phase 10B: Mobile Campaign Creator Wizard + Profile Studio
 
 ## Owner
-
-QA/demo agent. Other agents only fix assigned bugs.
+Mobile frontend agent. Start after Phase 10A Done Gate.
 
 ## Allowed Scope
-
 ```text
-README.md
-SPORTSPHERE_EXECUTION_ROADMAP.md
-admin-web/src/**        only for polish/bugfixes
-mobile-app/src/**       only for polish/bugfixes
-backend/src/**          only for confirmed bugfixes
+mobile-app/src/app/**
+mobile-app/src/components/**
 ```
 
-## Work
+## Deliverables
 
-1. Run the full demo from a clean seed.
-2. Fix obvious loading, empty, and error states.
-3. Confirm all demo accounts work.
-4. Confirm currency formatting is consistent.
-5. Confirm verification badges are understandable.
-6. Confirm the admin portal does not show stale local-only state.
-7. Update README with final run commands and demo script.
+1. **Profile Edit Screen** (shown only when logged-in user is the athlete):
+   - Editable: headline, bio, city, state, coach name, academy.
+   - Avatar upload via `expo-image-picker` + `PUT /api/athletes/me/avatar`.
 
-## Final Demo Script
+2. **Campaign Creator — 4-step wizard**:
+   - Step 1: Title, category (Travel / Gear / Nutrition / Coaching), target event, deadline picker.
+   - Step 2: Itemized budget table — add/remove rows with description and amount.
+   - Step 3: Optional evidence image attachment per budget line item.
+   - Step 4: Review summary → "Submit for Verification" calls `POST /api/athletes/me/campaigns`.
 
-```text
-1. Run clean seed.
-2. Start backend.
-3. Start admin web.
-4. Start mobile app.
-5. Log in as supporter.
-6. Browse athlete feed.
-7. Open athlete profile.
-8. Contribute Rs 1,000.
-9. Refresh and confirm funding progress increased.
-10. Log in as sponsor.
-11. Submit sponsorship interest.
-12. Log in as admin.
-13. Approve or reject pending verification.
-14. Review sponsorship proposal.
-15. Refresh admin page and confirm state persists.
-```
+3. **Athlete Private Dashboard tab** (visible only to logged-in athlete):
+   - Active campaigns with funding status.
+   - Pending verifications.
+   - Incoming corporate sponsor proposals.
 
 ## Done Gate
-
-The project is demo-ready only when the full demo script works without manual database edits.
+- [ ] Athlete completes wizard and campaign appears in admin portal.
+- [ ] Profile edits persist and are visible to other users on the profile screen.
+- [ ] `npx tsc --noEmit` passes.
 
 ---
 
-## Demo Accounts
+# Phase 11A: Coach Endorsement Schema + API
 
-Verify these after Phase 0 because seed source is currently unresolved.
+## Owner
+Backend agent. Start after Phase 10B Done Gate.
 
+## Allowed Scope
 ```text
-Admin:
-admin@sportsphere.com
-password123
-
-Supporter:
-supporter@demo.com
-password123
-
-Sponsor:
-sponsor@techcorp.com
-password123
-
-Athlete:
-aarav@athlete.com
-password123
+backend/prisma/schema.prisma
+backend/prisma/migrations/**
+backend/src/**
+SPORTSPHERE_EXECUTION_ROADMAP.md
 ```
 
+## Deliverables
+
+1. **`CoachEndorsement` model**:
+   ```prisma
+   model CoachEndorsement {
+     id         Int            @id @default(autoincrement())
+     athleteId  Int
+     athlete    AthleteProfile @relation(fields: [athleteId], references: [id])
+     coachName  String
+     coachTitle String?        // "Head Coach, SAI Patiala"
+     body       String
+     isVerified Boolean        @default(false)
+     createdAt  DateTime       @default(now())
+   }
+   ```
+
+2. API:
+   - `GET /api/athletes/:id/endorsements` — all endorsements for an athlete.
+   - `POST /api/admin/endorsements/:id/verify` — admin sets `isVerified: true`.
+
+3. Seed 1–2 endorsements per athlete with realistic coach details.
+
+4. **Run migration**: `npx prisma migrate dev --name phase-11a-coach-endorsements`
+
+## Done Gate
+- [ ] Endorsements returned by `GET /api/athletes/:id/endorsements` with seeded data.
+- [ ] Admin verify endpoint toggles `isVerified` and persists.
+
 ---
 
-## Strict Non-Goals For MVP
+# Phase 11B: Mobile Endorsements Display + Cheer System
 
-Do not build these during stabilization:
+## Owner
+Mobile frontend agent. Start after Phase 11A Done Gate.
 
+## Allowed Scope
 ```text
-social feed posts
-likes
-comments
-followers
-chat
-coach messaging
-notifications
-AI recommendations
-advanced ranking
-real document upload
-cloud storage/S3/R2
-production Razorpay integration
-athlete self-service dashboard
-full sponsor dashboard
-analytics dashboard
-public marketing landing page
-app store packaging
+mobile-app/src/app/athlete/[id].tsx
+mobile-app/src/components/**
 ```
 
-These belong in the expansion backlog after the core demo is stable.
+## Deliverables
+
+1. **Endorsement Cards section** on athlete profile:
+   - Coach name, title, endorsement text.
+   - "✓ Coach Verified" green badge if `isVerified: true`.
+   - Unverified endorsements show with a "Pending Verification" muted badge.
+
+2. **Cheer button polish** on the Updates feed (Phase 8B) — confirm optimistic update and revert on error is working correctly.
+
+## Done Gate
+- [ ] Endorsement section renders on athlete profile with at least 1 seeded entry.
+- [ ] Verified coaches display green badge; unverified show muted pending state.
 
 ---
 
-## Progress Log
+## 8. Known Issues & Backlog Tracker (v2.0)
 
-Add one row for each meaningful completed change.
+| ID | Feature / Issue | Phase | Priority | Status |
+|:---|:---|:---|:---|:---|
+| **E-001** | No `MediaAsset` model — no photo infrastructure exists | Phase 7A | Critical | **Next Up** |
+| **E-002** | Seed data has no photos, banners, or headlines | Phase 7B | High | Queued after 7A |
+| **E-003** | Mobile feed shows no athlete photos | Phase 7C | High | Queued after 7B |
+| **E-004** | No `CareerMilestone`, `Post`, or `Cheer` models exist | Phase 8A | High | Queued |
+| **E-005** | No Updates feed tab on mobile | Phase 8B | Medium | Queued |
+| **E-006** | No career timeline on athlete profile | Phase 8C | Medium | Queued |
+| **E-007** | Razorpay is mock/simulated — not real | Phase 9A | High | Queued — see Blocker B-001 |
+| **E-008** | No animated progress bar | Phase 9C | Medium | Queued |
+| **E-009** | No backers wall on athlete profile | Phase 9C | Medium | Queued |
+| **E-010** | Athletes cannot edit their own profiles | Phase 10A | High | Queued |
+| **E-011** | Athletes cannot self-submit funding campaigns | Phase 10A | High | Queued |
+| **E-012** | No coach endorsement data model or UI | Phase 11A | Medium | Queued |
+
+---
+
+## 9. Progress Log
 
 | Date | Agent/Owner | Phase | Change Made | Files Touched | Verification |
 |:---|:---|:---|:---|:---|:---|
-| 2026-10-12 | Antigravity | Phase 0 | Canonicalized backend to `index.ts` via `tsx`; deprecated `index.js` | `package.json`, `src/index.js` | Backend starts on port 5000 ✓ |
-| 2026-10-12 | Antigravity | Phase 0 | Ported full rich seed data to `seed.ts`; deprecated `seed.js` | `prisma/seed.ts`, `prisma/seed.js` | 10 athletes, 15 achievements, 10 support requests seeded ✓ |
-| 2026-10-12 | Antigravity | Phase 1 | Verified all auth contracts: register, login, /me, 401/403 guards | — | All passed ✓ |
-| 2026-10-12 | Antigravity | Phase 1 | Verified athlete discovery: GET /athletes (10), GET /athletes/:id (achievements+budgetItems+verifications), GET /support-requests/:id | — | All passed ✓ |
-| 2026-10-12 | Antigravity | Phase 1 | Verified funding: legacy support route persists amountSupported; Razorpay mock create-order+webhook full cycle persists | — | All passed ✓ |
-| 2026-10-12 | Antigravity | Phase 1 | Verified admin verification: pending list, approve/reject/request-correction all persist in DB | — | All passed ✓ |
-| 2026-10-12 | Antigravity | Phase 1 | Verified admin sponsorship: submit interest, GET list, PUT status update persists | — | All passed ✓ |
-| 2026-10-12 | Antigravity | Phase 1 | Verified admin support requests, audit log, dashboard endpoints | — | All passed ✓ |
-| 2026-10-12 | Antigravity | Phase 2 | Phase 2A: Created `admin-web/src/api` module with typed API clients for auth, admin, athletes. Centralized token and error handling in `App.tsx`. Phase 2B: Enhanced `mobile-app/src/utils/config.ts` with consistent token retrieval, `apiClient` Bearer interceptor, and typed `mobileApi` helper. | `admin-web/src/api/*`, `admin-web/src/App.tsx`, `mobile-app/src/utils/config.ts` | `npm run build` (admin) ✓; `npx tsc --noEmit` (mobile) ✓ |
-| 2026-10-12 | Antigravity | Phase 3 | Replaced local-only verification state in `admin-web/src/App.tsx` with live `adminApi` calls. Added per-item loading spinners, button disabling during mutation, error/success banners, and real-time dashboard refetching. Verified DB persistence & counter decrement. | `admin-web/src/App.tsx` | Live approve (135) & reject (134) persisted in SQLite; pending count updated 3->2->1 ✓; `npm run build` ✓ |
-| 2026-10-12 | Antigravity | Phase 4 | Rewrote `support/[id].tsx` to use `mobileApi.support.supportDirect`, removed fake success on catch block, added validation, honest error banners, and target details banner. Added `useFocusEffect` to `athlete/[id].tsx` and `dashboard.tsx` to automatically re-fetch updated funding progress. | `mobile-app/src/app/support/[id].tsx`, `mobile-app/src/app/athlete/[id].tsx`, `mobile-app/src/app/dashboard.tsx` | Live contribution of ₹1000 with supporter token increased amountSupported (5200 -> 6200) and persisted in SQLite ✓; `npx tsc --noEmit` ✓ |
-| 2026-10-12 | Antigravity | Phase 5 | Built mobile sponsorship proposal form on athlete profile (`athlete/[id].tsx`) and added sponsorship proposal review/action management to admin portal (`admin-web/src/App.tsx`). Verified end-to-end proposal submission by sponsor and status update to ACCEPTED by admin. | `mobile-app/src/app/athlete/[id].tsx`, `mobile-app/src/utils/config.ts`, `admin-web/src/App.tsx` | Full sponsor submit -> admin review -> ACCEPTED flow persisted in SQLite ✓; both builds passing ✓ |
-| 2026-10-12 | Antigravity | Phase 6 | Complete QA & Polish: refreshed seed demo data, confirmed currency formatting and badges, updated comprehensive README.md with full quickstart runbook, demo accounts, verified contracts, and 3-scene presentation walkthrough script. | `README.md`, `SPORTSPHERE_EXECUTION_ROADMAP.md` | All 3 tiers operational; verified end-to-end demo flow ✓ |
+| 2026-10-12 | Antigravity | Phase 0 | Canonicalized backend to `index.ts`; deprecated `index.js` | `package.json`, `src/index.js` | Backend starts on port 5000 ✓ |
+| 2026-10-12 | Antigravity | Phase 0 | Ported rich seed to `seed.ts`; deprecated `seed.js` | `prisma/seed.ts`, `prisma/seed.js` | 10 athletes, 15 achievements seeded ✓ |
+| 2026-10-12 | Antigravity | Phase 1 | All auth, discovery, funding, admin, and sponsorship contracts verified | — | All passed ✓ |
+| 2026-10-12 | Antigravity | Phase 2 | Typed Axios clients with Bearer token interceptors on admin web and mobile | `admin-web/src/api/*`, `mobile-app/src/utils/config.ts` | Builds passing ✓ |
+| 2026-10-12 | Antigravity | Phase 3 | Admin verification wired to live API; spinners, banners, DB persistence | `admin-web/src/App.tsx` | Live approve/reject persist ✓ |
+| 2026-10-12 | Antigravity | Phase 4 | Mobile support flow wired honestly; auto-refresh on screen focus | `support/[id].tsx`, `athlete/[id].tsx`, `dashboard.tsx` | ₹1000 contribution persists ✓ |
+| 2026-10-12 | Antigravity | Phase 5 | Sponsor proposal form on mobile; review + action UI in admin portal | `athlete/[id].tsx`, `App.tsx` | Full proposal loop persists ✓ |
+| 2026-10-12 | Antigravity | Phase 6 | QA pass; comprehensive README runbook written | `README.md` | End-to-end demo confirmed ✓ |
 
 ---
 
-## Decision Log
-
-Record decisions that future agents must respect.
+## 10. Decision Log
 
 | Date | Decision | Reason | Owner |
 |:---|:---|:---|:---|
-| 2026-10-12 | `index.ts` is the canonical backend source | It is 822 lines vs 631 in `.js`; has TypeScript types, audit logs, and all admin routes | Antigravity / Phase 0 |
-| 2026-10-12 | `seed.ts` is the canonical seed | Rich data ported from `seed.js`; TypeScript forward-compatible | Antigravity / Phase 0 |
-| 2026-10-12 | `GET /api/athletes` returns a plain array (no wrapper) | Mobile reads `res.data` directly as array — correct. Admin web must do same. | Antigravity / Phase 1 |
-| 2026-10-12 | Legacy `/support-requests/:id/support` route is acceptable for MVP | Auto-success with `amountSupported` increment persists. Razorpay mock flow also works. Either is usable for demo. | Antigravity / Phase 1 |
-| 2026-10-12 | Audit log endpoint returns `{ logs, total, page, limit, totalPages }` wrapper | Admin web must read `response.data.logs`, not `response.data` | Antigravity / Phase 1 |
-| 2026-10-12 | Admin & mobile clients use centralized Axios instances with automatic Bearer token interceptors | Prevents inconsistent manual token headers and unauthenticated 401s across screens | Antigravity / Phase 2 |
+| 2026-10-12 | `index.ts` is the canonical backend source | 822 lines vs 631 in `.js`; has TypeScript types, audit logs, all admin routes | Antigravity / Phase 0 |
+| 2026-10-12 | `seed.ts` is the canonical seed | Rich data ported; TypeScript forward-compatible | Antigravity / Phase 0 |
+| 2026-10-12 | `GET /api/athletes` returns a plain array (no wrapper) | Mobile reads `res.data` directly as array | Antigravity / Phase 1 |
+| 2026-10-12 | Legacy `/support-requests/:id/support` acceptable until Phase 9 | Razorpay mock also works for demo; either is usable for MVP | Antigravity / Phase 1 |
+| 2026-10-12 | Audit log returns `{ logs, total, page, limit, totalPages }` | Admin must read `response.data.logs`, not `response.data` | Antigravity / Phase 1 |
+| 2026-10-12 | Centralized Axios instances with auto Bearer token on both clients | Prevents inconsistent manual headers and surprise 401s | Antigravity / Phase 2 |
+| 2026-10-12 | `MediaAsset` as a relation table, NOT a JSON blob | SQLite has no native array type; relation is queryable and orderable | Antigravity / Roadmap v2.0 |
+| 2026-10-12 | `Cheer` as a relation table with `@@unique([postId, userId])`, NOT integer counter | Integer increment is a write race condition; relation enforces 1 cheer/user/post | Antigravity / Roadmap v2.0 |
+| — | Expo Go vs `expo-dev-client` for Phase 9B | **PENDING** — `react-native-razorpay` is a native module; cannot run in Expo Go | Team / Before Phase 9B |
 
 ---
 
-## Blocker Log
+## 11. Blocker Log
 
-Record blockers instead of hiding them in chat.
+| ID | Date | Blocker | Affected Phase | Impact | Proposed Resolution | Owner | Status |
+|:---|:---|:---|:---|:---|:---|:---|:---|
+| **B-001** | — | `react-native-razorpay` is a native module and cannot run in standard Expo Go | Phase 9B | Blocks real Razorpay checkout on mobile entirely | Switch to `expo-dev-client`; run `npx expo run:android` or produce an EAS dev build | Team | **Pending Decision** |
 
-| Date | Blocker | Affected Phase | Impact | Proposed Resolution | Owner | Status |
-|:---|:---|:---|:---|:---|:---|:---|
-|  |  |  |  |  |  |  |
+---
+
+## 12. Summary Persona Matrix
+
+| Persona | Account | Role in SportSphere 2.0 |
+|:---|:---|:---|
+| **Admin** | `admin@sportsphere.com` / `password123` | Approves athlete credentials, campaigns, reviews B2B proposals, verifies coaches |
+| **Athlete** | `aarav@athlete.com` / `password123` | Media-rich verified profile; self-publishes campaigns and training updates (Phase 10) |
+| **Supporter** | `supporter@demo.com` / `password123` | Micro-funds via real Razorpay (Phase 9); appears on backers wall with cheer note |
+| **Sponsor** | `sponsor@techcorp.com` / `password123` | Browses verified talent; submits B2B equipment/travel/financial sponsorship proposals |
 
 ---
 
@@ -702,8 +749,7 @@ Record blockers instead of hiding them in chat.
 Move in this order:
 
 ```text
-stabilize -> lock contracts -> wire clients -> prove persistence -> polish -> expand
+Look credible → Be real → Enable action → Scale trust
 ```
 
-The best few-day version of SportSphere is a clean, believable vertical slice, not a huge unfinished platform.
-
+SportSphere's value proposition is **trust**. Every phase must make the product feel more legitimate and athlete-worthy before adding new features.
