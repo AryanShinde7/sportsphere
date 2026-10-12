@@ -1,8 +1,16 @@
-import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Image, SafeAreaView } from 'react-native';
-import { useLocalSearchParams, router } from 'expo-router';
-import axios from 'axios';
-import { API_URL } from '../../utils/config';
+import React, { useEffect, useState, useCallback } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  TouchableOpacity,
+  ActivityIndicator,
+  Image,
+  TextInput,
+} from 'react-native';
+import { useLocalSearchParams, router, useFocusEffect } from 'expo-router';
+import { mobileApi } from '../../utils/config';
 
 const PRIMARY = '#E2550B';
 const BG = '#F9FAFB';
@@ -20,18 +28,62 @@ export default function AthleteProfileScreen() {
   const [athlete, setAthlete] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    fetchAthlete();
-  }, [id]);
+  // Sponsorship proposal state
+  const [showSponsorForm, setShowSponsorForm] = useState(false);
+  const [orgName, setOrgName] = useState('');
+  const [contactPerson, setContactPerson] = useState('');
+  const [supportType, setSupportType] = useState('FINANCIAL');
+  const [proposedAmount, setProposedAmount] = useState('250000');
+  const [duration, setDuration] = useState('12 Months');
+  const [message, setMessage] = useState('');
+  const [sponsorLoading, setSponsorLoading] = useState(false);
+  const [sponsorError, setSponsorError] = useState<string | null>(null);
+  const [sponsorSuccess, setSponsorSuccess] = useState(false);
+
+  useFocusEffect(
+    useCallback(() => {
+      fetchAthlete();
+    }, [id])
+  );
 
   const fetchAthlete = async () => {
     try {
-      const res = await axios.get(`${API_URL}/athletes/${id}`);
-      setAthlete(res.data);
+      const data = await mobileApi.athletes.getById(id as string);
+      setAthlete(data);
     } catch (err) {
       console.error('Athlete detail error:', err);
     }
     setLoading(false);
+  };
+
+  const handleSponsorSubmit = async () => {
+    if (!orgName.trim() || !contactPerson.trim()) {
+      setSponsorError('Please provide your organization name and contact person.');
+      return;
+    }
+    setSponsorError(null);
+    setSponsorLoading(true);
+    try {
+      await mobileApi.sponsorship.createInterest(athlete.id, {
+        organizationName: orgName.trim(),
+        contactPerson: contactPerson.trim(),
+        supportType,
+        proposedAmount: proposedAmount ? `₹${proposedAmount}` : undefined,
+        duration: duration.trim(),
+        message: message.trim() || undefined,
+      });
+      setSponsorSuccess(true);
+    } catch (err: any) {
+      console.error('Sponsor proposal error:', err);
+      const msg =
+        err.response?.data?.error ||
+        (err.response?.status === 403
+          ? 'Only registered sponsor accounts can submit corporate proposals. Log in with a sponsor account (e.g. sponsor@techcorp.com).'
+          : 'Failed to submit proposal. Please check server connection.');
+      setSponsorError(msg);
+    } finally {
+      setSponsorLoading(false);
+    }
   };
 
   if (loading) {
@@ -107,6 +159,139 @@ export default function AthleteProfileScreen() {
               </TouchableOpacity>
             </View>
           )}
+
+          {/* Corporate Sponsorship Section */}
+          <View style={styles.sponsorSection}>
+            <Text style={styles.sponsorTitle}>Corporate Sponsorship</Text>
+            <Text style={styles.sponsorSubtitle}>
+              Back athlete training, equipment, or travel through verified brand sponsorship.
+            </Text>
+
+            {sponsorSuccess ? (
+              <View style={styles.sponsorSuccessCard}>
+                <Text style={{ fontSize: 28, marginBottom: 6 }}>🤝</Text>
+                <Text style={styles.sponsorSuccessTitle}>Proposal Submitted!</Text>
+                <Text style={styles.sponsorSuccessDesc}>
+                  Your sponsorship proposal has been recorded in the SportSphere portal and forwarded for administrative review.
+                </Text>
+                <TouchableOpacity
+                  style={styles.resetBtn}
+                  onPress={() => {
+                    setSponsorSuccess(false);
+                    setShowSponsorForm(false);
+                  }}
+                >
+                  <Text style={styles.resetBtnText}>Submit Another Proposal</Text>
+                </TouchableOpacity>
+              </View>
+            ) : !showSponsorForm ? (
+              <TouchableOpacity
+                style={styles.sponsorToggleBtn}
+                onPress={() => setShowSponsorForm(true)}
+                activeOpacity={0.85}
+              >
+                <Text style={styles.sponsorToggleBtnText}>💼 SUBMIT SPONSORSHIP PROPOSAL →</Text>
+              </TouchableOpacity>
+            ) : (
+              <View style={styles.sponsorForm}>
+                {sponsorError && (
+                  <View style={styles.errorBox}>
+                    <Text style={styles.errorText}>⚠️ {sponsorError}</Text>
+                  </View>
+                )}
+
+                <Text style={styles.inputLabel}>ORGANIZATION / BRAND NAME</Text>
+                <TextInput
+                  style={styles.formInput}
+                  value={orgName}
+                  onChangeText={setOrgName}
+                  placeholder="e.g. Tata Sports Trust, TechCorp"
+                  placeholderTextColor={TEXT_FAINT}
+                />
+
+                <Text style={styles.inputLabel}>CONTACT PERSON</Text>
+                <TextInput
+                  style={styles.formInput}
+                  value={contactPerson}
+                  onChangeText={setContactPerson}
+                  placeholder="e.g. Vikram Malhotra"
+                  placeholderTextColor={TEXT_FAINT}
+                />
+
+                <Text style={styles.inputLabel}>SUPPORT TYPE</Text>
+                <View style={{ flexDirection: 'row', gap: 8, marginBottom: 12 }}>
+                  {['FINANCIAL', 'EQUIPMENT', 'TRAVEL'].map((type) => (
+                    <TouchableOpacity
+                      key={type}
+                      style={[styles.typeChip, supportType === type && styles.typeChipActive]}
+                      onPress={() => setSupportType(type)}
+                    >
+                      <Text style={[styles.typeChipText, supportType === type && styles.typeChipTextActive]}>
+                        {type}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+
+                <View style={{ flexDirection: 'row', gap: 12 }}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.inputLabel}>AMOUNT (₹)</Text>
+                    <TextInput
+                      style={styles.formInput}
+                      value={proposedAmount}
+                      onChangeText={setProposedAmount}
+                      placeholder="250000"
+                      keyboardType="numeric"
+                      placeholderTextColor={TEXT_FAINT}
+                    />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.inputLabel}>DURATION</Text>
+                    <TextInput
+                      style={styles.formInput}
+                      value={duration}
+                      onChangeText={setDuration}
+                      placeholder="12 Months"
+                      placeholderTextColor={TEXT_FAINT}
+                    />
+                  </View>
+                </View>
+
+                <Text style={styles.inputLabel}>PROPOSAL MESSAGE</Text>
+                <TextInput
+                  style={[styles.formInput, { height: 72, textAlignVertical: 'top' }]}
+                  value={message}
+                  onChangeText={setMessage}
+                  placeholder="Details regarding your sponsorship offer and requirements..."
+                  placeholderTextColor={TEXT_FAINT}
+                  multiline
+                />
+
+                <View style={{ flexDirection: 'row', gap: 10, marginTop: 4 }}>
+                  <TouchableOpacity
+                    style={styles.cancelBtn}
+                    onPress={() => {
+                      setShowSponsorForm(false);
+                      setSponsorError(null);
+                    }}
+                  >
+                    <Text style={styles.cancelBtnText}>Cancel</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.submitSponsorBtn, sponsorLoading && { opacity: 0.7 }]}
+                    onPress={handleSponsorSubmit}
+                    disabled={sponsorLoading}
+                  >
+                    {sponsorLoading ? (
+                      <ActivityIndicator color="#fff" size="small" />
+                    ) : (
+                      <Text style={styles.submitSponsorBtnText}>SEND PROPOSAL →</Text>
+                    )}
+                  </TouchableOpacity>
+                </View>
+              </View>
+            )}
+          </View>
         </View>
       </View>
     </ScrollView>
@@ -182,5 +367,86 @@ const styles = StyleSheet.create({
     marginTop: 16,
     shadowColor: PRIMARY, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.25, shadowRadius: 10, elevation: 5,
   },
-  supportBtnText: { color: '#fff', fontWeight: '900', fontSize: 14, letterSpacing: 1, fontStyle: 'italic' }
+  supportBtnText: { color: '#fff', fontWeight: '900', fontSize: 14, letterSpacing: 1, fontStyle: 'italic' },
+
+  sponsorSection: {
+    marginTop: 24,
+    backgroundColor: '#F8FAFC',
+    padding: 18,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  sponsorTitle: { color: '#0F172A', fontWeight: '900', fontSize: 16, marginBottom: 4 },
+  sponsorSubtitle: { color: TEXT_DIM, fontSize: 12.5, lineHeight: 18, marginBottom: 14 },
+  sponsorToggleBtn: {
+    backgroundColor: '#0F172A',
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  sponsorToggleBtnText: { color: '#FFFFFF', fontWeight: '800', fontSize: 13, letterSpacing: 0.5 },
+  sponsorForm: { marginTop: 4 },
+  inputLabel: { fontSize: 10.5, fontWeight: '800', color: TEXT_DIM, letterSpacing: 0.8, marginBottom: 6 },
+  formInput: {
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: BORDER,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 13,
+    color: TEXT_MAIN,
+    marginBottom: 12,
+  },
+  typeChip: {
+    flex: 1,
+    paddingVertical: 8,
+    borderRadius: 8,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: BORDER,
+    alignItems: 'center',
+  },
+  typeChipActive: { backgroundColor: '#0F172A', borderColor: '#0F172A' },
+  typeChipText: { fontSize: 11, fontWeight: '700', color: TEXT_DIM },
+  typeChipTextActive: { color: '#FFFFFF' },
+  cancelBtn: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 10,
+    backgroundColor: '#E2E8F0',
+    alignItems: 'center',
+  },
+  cancelBtnText: { color: TEXT_DIM, fontWeight: '700', fontSize: 13 },
+  submitSponsorBtn: {
+    flex: 2,
+    paddingVertical: 12,
+    borderRadius: 10,
+    backgroundColor: '#0F172A',
+    alignItems: 'center',
+  },
+  submitSponsorBtnText: { color: '#FFFFFF', fontWeight: '800', fontSize: 13 },
+  sponsorSuccessCard: {
+    backgroundColor: '#F0FDF4',
+    borderWidth: 1,
+    borderColor: '#BBF7D0',
+    borderRadius: 12,
+    padding: 16,
+    alignItems: 'center',
+  },
+  sponsorSuccessTitle: { fontSize: 16, fontWeight: '900', color: '#166534', marginBottom: 4 },
+  sponsorSuccessDesc: { fontSize: 12.5, color: '#15803D', textAlign: 'center', lineHeight: 18 },
+  resetBtn: { marginTop: 12, paddingVertical: 8, paddingHorizontal: 16, borderRadius: 8, backgroundColor: '#DCFCE7' },
+  resetBtnText: { fontSize: 12, fontWeight: '700', color: '#166534' },
+  errorBox: {
+    backgroundColor: '#FEE2E2',
+    borderWidth: 1,
+    borderColor: '#F87171',
+    borderRadius: 8,
+    padding: 10,
+    marginBottom: 12,
+  },
+  errorText: { color: '#DC2626', fontSize: 12, fontWeight: '600' },
 });
+
