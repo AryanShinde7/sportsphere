@@ -4,19 +4,37 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios, { AxiosInstance, AxiosRequestConfig } from 'axios';
 
 export const getApiUrl = () => {
-  if (Platform.OS === 'web' && typeof window !== 'undefined' && window.location?.hostname === 'localhost') {
-    return 'http://localhost:5000/api';
+  if (Platform.OS === 'web' && typeof window !== 'undefined') {
+    const host = window.location?.hostname || 'localhost';
+    return `http://${host}:5000/api`;
   }
-  const hostUri = Constants.expoConfig?.hostUri || (Constants as any).manifest2?.extra?.expoGo?.debuggerHost;
+
+  // 1. Automatically detect Metro host IP (matches whatever Wi-Fi network the phone is on)
+  const hostUri =
+    Constants.expoConfig?.hostUri ||
+    (Constants as any).manifest2?.extra?.expoGo?.debuggerHost ||
+    (Constants as any).manifest?.debuggerHost ||
+    (Constants as any).expoGoConfig?.debuggerHost;
+
   if (hostUri) {
-    const ip = hostUri.split(':')[0];
+    let ip = hostUri.split(':')[0];
+    if ((ip === 'localhost' || ip === '127.0.0.1') && Platform.OS === 'android') {
+      ip = '10.0.2.2';
+    }
     return `http://${ip}:5000/api`;
   }
-  // Default LAN IP fallback
-  return 'http://10.175.233.47:5000/api';
+
+  // 2. Explicit environment variable override
+  if (process.env.EXPO_PUBLIC_API_URL) {
+    return process.env.EXPO_PUBLIC_API_URL;
+  }
+
+  // 3. Fallback to current LAN IP
+  return 'http://192.168.1.10:5000/api';
 };
 
 export const API_URL = getApiUrl();
+console.log('[Sportsphere] API_URL resolved to:', API_URL);
 
 export const Storage = {
   setItem: async (key: string, value: string) => {
@@ -128,12 +146,54 @@ export const mobileApi = {
       const res = await apiClient.post('/auth/login', credentials);
       return res.data;
     },
-    register: async (userData: { name: string; email: string; password: string; role?: string }) => {
-      const res = await apiClient.post('/auth/register', { role: 'SUPPORTER', ...userData });
+    register: async (userData: {
+      name: string;
+      email: string;
+      password: string;
+      role?: 'ATHLETE' | 'SUPPORTER' | 'SPONSOR';
+      phone?: string;
+      sportId?: number;
+      discipline?: string;
+      city?: string;
+      state?: string;
+      headline?: string;
+      bio?: string;
+      currentGoal?: string;
+    }) => {
+      const res = await apiClient.post('/auth/register', userData);
       return res.data;
     },
     getMe: async () => {
       const res = await apiClient.get('/auth/me');
+      return res.data;
+    },
+  },
+
+  sports: {
+    getAll: async () => {
+      const res = await apiClient.get('/sports');
+      return res.data;
+    },
+    create: async (name: string, category: string = 'Custom Sport') => {
+      const res = await apiClient.post('/sports', { name, category });
+      return res.data;
+    },
+  },
+
+  user: {
+    updateProfile: async (data: {
+      name?: string;
+      phone?: string;
+      profileImageUrl?: string;
+      organizationName?: string;
+      organizationType?: string;
+      budgetRange?: string;
+    }) => {
+      const res = await apiClient.put('/users/profile', data);
+      return res.data;
+    },
+    getContributions: async () => {
+      const res = await apiClient.get('/users/contributions');
       return res.data;
     },
   },
@@ -147,6 +207,23 @@ export const mobileApi = {
       const res = await apiClient.get(`/athletes/${id}`);
       return res.data;
     },
+    updateProfile: async (data: {
+      name?: string;
+      phone?: string;
+      sportId?: number;
+      sportName?: string;
+      discipline?: string;
+      city?: string;
+      state?: string;
+      headline?: string;
+      bio?: string;
+      currentGoal?: string;
+      coachName?: string;
+      academyName?: string;
+    }) => {
+      const res = await apiClient.put('/athletes/profile', data);
+      return res.data;
+    },
   },
 
   support: {
@@ -154,36 +231,37 @@ export const mobileApi = {
       const res = await apiClient.get(`/support-requests/${id}`);
       return res.data;
     },
+    getAllSupportRequests: async () => {
+      const res = await apiClient.get('/support-requests');
+      return res.data;
+    },
+    createSupportRequest: async (data: {
+      title: string;
+      category: string;
+      targetAmount: number;
+      description?: string;
+      deadline?: string;
+      budgetItems?: { description: string; amount: number; evidenceFileId?: string }[];
+      evidenceUrl?: string;
+    }) => {
+      const res = await apiClient.post('/support-requests', data);
+      return res.data;
+    },
+    createRazorpayOrder: async (supportRequestId: number | string, amount: number) => {
+      const res = await apiClient.post('/payments/razorpay/create-order', { supportRequestId, amount });
+      return res.data;
+    },
+    verifyPayment: async (payload: {
+      razorpay_order_id: string;
+      razorpay_payment_id: string;
+      razorpay_signature?: string;
+      supportId?: number;
+    }) => {
+      const res = await apiClient.post('/payments/razorpay/verify', payload);
+      return res.data;
+    },
     supportDirect: async (requestId: number | string, amount: number) => {
       const res = await apiClient.post(`/support-requests/${requestId}/support`, { amount });
-      return res.data;
-    },
-    createRazorpayOrder: async (amount: number, currency: string = 'INR') => {
-      const res = await apiClient.post('/payments/razorpay/create-order', { amount, currency });
-      return res.data;
-    },
-    mockRazorpayWebhook: async (payload: {
-      orderId: string;
-      paymentId: string;
-      supportRequestId: number | string;
-      amount: number;
-    }) => {
-      const res = await apiClient.post('/payments/razorpay/webhook', {
-        event: 'payment.captured',
-        payload: {
-          payment: {
-            entity: {
-              id: payload.paymentId,
-              order_id: payload.orderId,
-              amount: payload.amount,
-              status: 'captured',
-              notes: {
-                supportRequestId: payload.supportRequestId,
-              },
-            },
-          },
-        },
-      });
       return res.data;
     },
   },

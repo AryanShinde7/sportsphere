@@ -10,9 +10,12 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
+  Modal,
 } from 'react-native';
 import { useLocalSearchParams, router } from 'expo-router';
-import { mobileApi } from '../../utils/config';
+import { WebView } from 'react-native-webview';
+import Ionicons from '@expo/vector-icons/Ionicons';
+import { mobileApi, API_URL } from '../../utils/config';
 
 const PRIMARY = '#E2550B';
 const BG = '#F9FAFB';
@@ -27,9 +30,14 @@ export default function SupportScreen() {
   const { id } = useLocalSearchParams();
   const [amount, setAmount] = useState('1000');
   const [loading, setLoading] = useState(false);
+  const [verifying, setVerifying] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
   const [requestDetails, setRequestDetails] = useState<any>(null);
+
+  // Razorpay Checkout Modal
+  const [isRazorpayModalVisible, setIsRazorpayModalVisible] = useState(false);
+  const [razorpayOrder, setRazorpayOrder] = useState<any>(null);
 
   useEffect(() => {
     if (id) {
@@ -40,7 +48,7 @@ export default function SupportScreen() {
     }
   }, [id]);
 
-  const handleSupport = async () => {
+  const handleInitiatePayment = async () => {
     const numAmount = parseFloat(amount);
     if (isNaN(numAmount) || numAmount <= 0) {
       setError('Please enter a valid contribution amount greater than ₹0.');
@@ -51,19 +59,73 @@ export default function SupportScreen() {
     setLoading(true);
 
     try {
-      await mobileApi.support.supportDirect(id as string, numAmount);
-      setSuccess(true);
+      const order = await mobileApi.support.createRazorpayOrder(id as string, numAmount);
+      setRazorpayOrder(order);
+      setIsRazorpayModalVisible(true);
     } catch (err: any) {
       console.error('Support payment error:', err);
       const msg =
         err.response?.data?.error ||
         (err.message?.includes('Network Error')
           ? 'Network error: Unable to reach backend server. Please verify your connection.'
-          : 'Payment contribution could not be processed. Please try again.');
+          : 'Failed to initiate Razorpay checkout. Please try again.');
       setError(msg);
       setSuccess(false);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleCheckoutMessage = async (msgData: string) => {
+    try {
+      const parsed = JSON.parse(msgData);
+      if (parsed.event === 'SUCCESS') {
+        setIsRazorpayModalVisible(false);
+        setVerifying(true);
+
+        await mobileApi.support.verifyPayment({
+          razorpay_order_id: parsed.razorpay_order_id,
+          razorpay_payment_id: parsed.razorpay_payment_id,
+          razorpay_signature: parsed.razorpay_signature,
+          supportId: razorpayOrder?.supportId,
+        });
+
+        // Re-fetch request details to show updated amount
+        const updated = await mobileApi.support.getSupportRequest(id as string);
+        setRequestDetails(updated);
+        setSuccess(true);
+      } else if (parsed.event === 'CANCELLED') {
+        setIsRazorpayModalVisible(false);
+      }
+    } catch (e: any) {
+      console.warn('Checkout postMessage error:', e);
+      setError(e.response?.data?.error || 'Payment verification failed.');
+    } finally {
+      setVerifying(false);
+    }
+  };
+
+  const handleInstantSandboxVerify = async () => {
+    if (!razorpayOrder) return;
+    setIsRazorpayModalVisible(false);
+    setVerifying(true);
+
+    try {
+      await mobileApi.support.verifyPayment({
+        razorpay_order_id: razorpayOrder.orderId,
+        razorpay_payment_id: `pay_sim_${Date.now()}`,
+        razorpay_signature: 'sandbox_verified_signature',
+        supportId: razorpayOrder.supportId,
+      });
+
+      const updated = await mobileApi.support.getSupportRequest(id as string);
+      setRequestDetails(updated);
+      setSuccess(true);
+    } catch (e: any) {
+      console.error('Instant verify error:', e);
+      setError('Verification error. Please retry.');
+    } finally {
+      setVerifying(false);
     }
   };
 
@@ -74,14 +136,14 @@ export default function SupportScreen() {
     return (
       <SafeAreaView style={styles.center}>
         <View style={styles.successIcon}>
-          <Text style={{ fontSize: 44 }}>🎉</Text>
+          <Ionicons name="checkmark-circle" size={56} color="#059669" />
         </View>
         <Text style={styles.successTitle}>Support Confirmed!</Text>
         <Text style={styles.text}>
           Thank you for backing {athleteName ? `${athleteName}` : 'an Indian athlete'} with ₹{amount}.
         </Text>
         <Text style={[styles.text, { fontSize: 12.5, color: '#059669', marginBottom: 24, fontWeight: '600' }]}>
-          ✓ Contribution recorded and verified in public ledger.
+          ✓ Razorpay payment captured & verified on SportSphere ledger.
         </Text>
 
         <View style={{ width: '100%', maxWidth: 360, gap: 12 }}>
@@ -91,7 +153,7 @@ export default function SupportScreen() {
               onPress={() => router.replace(`/athlete/${athleteId}`)}
               activeOpacity={0.85}
             >
-              <Text style={styles.btnText}>View Athlete Profile →</Text>
+              <Text style={styles.btnText}>View Athlete Profile & Updated Goal →</Text>
             </TouchableOpacity>
           )}
 
@@ -115,10 +177,17 @@ export default function SupportScreen() {
       >
         <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
           <View style={styles.card}>
-            <Text style={styles.title}>Direct Athlete Contribution</Text>
-            <Text style={styles.subTitle}>
-              100% of your verified support goes towards athlete training & equipment.
-            </Text>
+            <View style={styles.rzpHeaderRow}>
+              <View>
+                <Text style={styles.title}>Direct Athlete Contribution</Text>
+                <Text style={styles.subTitle}>
+                  100% of your verified support goes towards athlete training & equipment.
+                </Text>
+              </View>
+              <View style={styles.rzpBadge}>
+                <Text style={styles.rzpBadgeText}>Razorpay Secure</Text>
+              </View>
+            </View>
 
             {requestDetails && (
               <View style={styles.targetBanner}>
@@ -127,14 +196,15 @@ export default function SupportScreen() {
                 </Text>
                 <Text style={styles.targetGoal}>{requestDetails.title}</Text>
                 <Text style={styles.targetRaised}>
-                  Currently Raised: ₹{requestDetails.amountSupported} of ₹{requestDetails.targetAmount}
+                  Currently Raised: ₹{requestDetails.amountSupported?.toLocaleString('en-IN')} of ₹{requestDetails.targetAmount?.toLocaleString('en-IN')}
                 </Text>
               </View>
             )}
 
             {error && (
               <View style={styles.errorBanner}>
-                <Text style={styles.errorText}>⚠️ {error}</Text>
+                <Ionicons name="alert-circle" size={18} color="#DC2626" />
+                <Text style={styles.errorText}>{error}</Text>
               </View>
             )}
 
@@ -172,27 +242,74 @@ export default function SupportScreen() {
             </View>
 
             <View style={styles.sandboxNotice}>
-              <Text style={styles.sandboxText}>🛡️ Verified Gateway Sandbox</Text>
-              <Text style={styles.sandboxSub}>
-                Simulated Razorpay transaction for instant verification and ledger persistence.
-              </Text>
+              <Ionicons name="shield-checkmark" size={18} color={PRIMARY} />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.sandboxText}>Powered by Razorpay Payments</Text>
+                <Text style={styles.sandboxSub}>
+                  UPI (GPay / PhonePe), Credit/Debit Cards, NetBanking, and Wallets supported.
+                </Text>
+              </View>
             </View>
 
             <TouchableOpacity
-              style={[styles.payBtn, loading && { opacity: 0.7 }]}
-              onPress={handleSupport}
-              disabled={loading}
+              style={[styles.payBtn, (loading || verifying) && { opacity: 0.7 }]}
+              onPress={handleInitiatePayment}
+              disabled={loading || verifying}
               activeOpacity={0.85}
             >
-              {loading ? (
-                <ActivityIndicator color="#fff" />
+              {loading || verifying ? (
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  <ActivityIndicator color="#fff" size="small" />
+                  <Text style={styles.payBtnText}>{verifying ? 'VERIFYING PAYMENT...' : 'INITIATING RAZORPAY...'}</Text>
+                </View>
               ) : (
-                <Text style={styles.payBtnText}>PROCEED TO PAY ₹{amount} →</Text>
+                <Text style={styles.payBtnText}>PROCEED WITH RAZORPAY (₹{amount}) →</Text>
               )}
             </TouchableOpacity>
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
+
+      {/* Razorpay WebView Checkout Modal */}
+      {isRazorpayModalVisible && razorpayOrder && (
+        <Modal visible={isRazorpayModalVisible} animationType="slide" onRequestClose={() => setIsRazorpayModalVisible(false)}>
+          <SafeAreaView style={{ flex: 1, backgroundColor: '#0F172A' }}>
+            <View style={styles.modalHeader}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <Ionicons name="lock-closed" size={16} color="#E2550B" />
+                <Text style={styles.modalHeaderTitle}>Razorpay Secure Checkout</Text>
+              </View>
+              <TouchableOpacity onPress={() => setIsRazorpayModalVisible(false)} style={styles.modalCloseBtn}>
+                <Ionicons name="close" size={20} color="#FFFFFF" />
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.modalSubHeader}>
+              <Text style={styles.modalSubText}>
+                Order: {razorpayOrder.orderId} · Amount: ₹{(razorpayOrder.amount / 100).toLocaleString('en-IN')}
+              </Text>
+              <TouchableOpacity onPress={handleInstantSandboxVerify} style={styles.quickSimBtn}>
+                <Text style={styles.quickSimText}>⚡ Quick Verify (Test Mode)</Text>
+              </TouchableOpacity>
+            </View>
+
+            <WebView
+              source={{
+                uri: `${API_URL}/payments/razorpay/checkout-page?orderId=${razorpayOrder.orderId}&amount=${razorpayOrder.amount}&keyId=${razorpayOrder.keyId}&title=${encodeURIComponent(requestDetails?.title || 'Athlete Funding')}`,
+              }}
+              onMessage={(event) => handleCheckoutMessage(event.nativeEvent.data)}
+              startInLoadingState
+              renderLoading={() => (
+                <View style={styles.webviewLoading}>
+                  <ActivityIndicator size="large" color={PRIMARY} />
+                  <Text style={{ color: '#94A3B8', marginTop: 10 }}>Loading Razorpay Gateway...</Text>
+                </View>
+              )}
+              style={{ flex: 1 }}
+            />
+          </SafeAreaView>
+        </Modal>
+      )}
     </SafeAreaView>
   );
 }
@@ -229,6 +346,26 @@ const styles = StyleSheet.create({
     shadowRadius: 12,
     elevation: 3,
   },
+  rzpHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 6,
+  },
+  rzpBadge: {
+    backgroundColor: '#EFF6FF',
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+  },
+  rzpBadgeText: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#1D4ED8',
+    letterSpacing: 0.5,
+  },
   title: {
     fontSize: 20,
     fontWeight: '900',
@@ -238,169 +375,223 @@ const styles = StyleSheet.create({
   subTitle: {
     fontSize: 13,
     color: TEXT_DIM,
-    marginBottom: 16,
-    lineHeight: 18,
   },
   targetBanner: {
-    backgroundColor: '#F3F4F6',
-    borderRadius: 12,
-    padding: 12,
-    marginBottom: 16,
-    borderLeftWidth: 4,
-    borderLeftColor: PRIMARY,
+    backgroundColor: '#F9FAFB',
+    borderWidth: 1,
+    borderColor: BORDER,
+    borderRadius: 14,
+    padding: 14,
+    marginVertical: 14,
+    gap: 3,
   },
   targetAthlete: {
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '800',
-    color: TEXT_MAIN,
-    marginBottom: 2,
+    color: PRIMARY,
+    letterSpacing: 0.5,
   },
   targetGoal: {
-    fontSize: 12,
-    color: TEXT_DIM,
-    marginBottom: 4,
+    fontSize: 15,
+    fontWeight: '700',
+    color: TEXT_MAIN,
   },
   targetRaised: {
-    fontSize: 11.5,
-    fontWeight: '700',
-    color: PRIMARY,
+    fontSize: 12,
+    fontWeight: '600',
+    color: TEXT_DIM,
+    marginTop: 2,
   },
   errorBanner: {
-    backgroundColor: '#FEE2E2',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#FEF2F2',
     borderWidth: 1,
-    borderColor: '#F87171',
-    borderRadius: 10,
-    padding: 10,
-    marginBottom: 16,
+    borderColor: '#FCA5A5',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 14,
   },
   errorText: {
     color: ERROR_RED,
-    fontSize: 12.5,
-    fontWeight: '700',
+    fontSize: 13,
+    fontWeight: '600',
+    flex: 1,
   },
   label: {
     fontSize: 11,
     fontWeight: '800',
-    letterSpacing: 1.2,
+    letterSpacing: 1,
     color: TEXT_DIM,
-    marginBottom: 8,
+    marginBottom: 6,
   },
   inputWrap: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#F9FAFB',
-    borderRadius: 14,
     borderWidth: 1.5,
-    borderColor: PRIMARY,
+    borderColor: BORDER,
+    borderRadius: 14,
     paddingHorizontal: 16,
-    marginBottom: 14,
+    marginBottom: 12,
   },
   currencyPrefix: {
-    fontSize: 24,
-    fontWeight: '900',
+    fontSize: 22,
+    fontWeight: '800',
     color: PRIMARY,
     marginRight: 6,
   },
   input: {
     flex: 1,
+    fontSize: 20,
+    fontWeight: '800',
     color: TEXT_MAIN,
-    fontSize: 24,
-    fontWeight: '900',
     paddingVertical: 12,
   },
   chipsRow: {
     flexDirection: 'row',
     gap: 8,
-    marginBottom: 20,
+    marginBottom: 18,
   },
   chip: {
     flex: 1,
-    paddingVertical: 8,
-    borderRadius: 8,
-    backgroundColor: '#F3F4F6',
-    borderWidth: 1,
+    backgroundColor: '#F9FAFB',
+    borderWidth: 1.5,
     borderColor: BORDER,
+    borderRadius: 10,
+    paddingVertical: 10,
     alignItems: 'center',
   },
   chipActive: {
-    backgroundColor: PRIMARY,
+    backgroundColor: '#FFF7ED',
     borderColor: PRIMARY,
   },
   chipText: {
-    fontSize: 12.5,
+    fontSize: 13,
     fontWeight: '700',
     color: TEXT_DIM,
   },
   chipTextActive: {
-    color: '#FFFFFF',
+    color: PRIMARY,
+    fontWeight: '800',
   },
   sandboxNotice: {
-    backgroundColor: '#EFF6FF',
-    padding: 14,
-    borderRadius: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: '#FFF7ED',
     borderWidth: 1,
-    borderColor: '#BFDBFE',
+    borderColor: '#FDBA74',
+    borderRadius: 12,
+    padding: 12,
     marginBottom: 20,
   },
   sandboxText: {
-    color: '#1D4ED8',
-    fontWeight: '800',
     fontSize: 12,
-    marginBottom: 2,
+    fontWeight: '800',
+    color: PRIMARY,
   },
   sandboxSub: {
-    color: '#3B82F6',
-    fontSize: 11.5,
-    lineHeight: 16,
+    fontSize: 11,
+    color: TEXT_DIM,
+    marginTop: 1,
   },
   payBtn: {
     backgroundColor: PRIMARY,
-    paddingVertical: 16,
     borderRadius: 14,
+    paddingVertical: 16,
     alignItems: 'center',
     shadowColor: PRIMARY,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.25,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.3,
     shadowRadius: 10,
     elevation: 4,
   },
   payBtnText: {
-    color: '#fff',
-    fontWeight: '900',
+    color: '#FFFFFF',
     fontSize: 14,
+    fontWeight: '900',
     letterSpacing: 1,
   },
   successIcon: {
-    width: 80,
-    height: 80,
-    backgroundColor: '#DCFCE7',
-    borderRadius: 40,
-    justifyContent: 'center',
-    alignItems: 'center',
     marginBottom: 16,
   },
   successTitle: {
     fontSize: 24,
     fontWeight: '900',
     color: TEXT_MAIN,
-    marginBottom: 6,
+    marginBottom: 8,
   },
   text: {
-    color: TEXT_DIM,
     fontSize: 14,
+    color: TEXT_DIM,
     textAlign: 'center',
-    marginBottom: 8,
+    marginBottom: 6,
+    maxWidth: 320,
   },
   btn: {
     backgroundColor: PRIMARY,
-    paddingHorizontal: 24,
     paddingVertical: 14,
     borderRadius: 12,
     alignItems: 'center',
   },
   btnText: {
-    color: '#fff',
-    fontWeight: '800',
+    color: '#FFFFFF',
     fontSize: 14,
+    fontWeight: '800',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#1E293B',
+    backgroundColor: '#0F172A',
+  },
+  modalHeaderTitle: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  modalCloseBtn: {
+    padding: 6,
+    borderRadius: 16,
+    backgroundColor: '#1E293B',
+  },
+  modalSubHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    backgroundColor: '#1E293B',
+  },
+  modalSubText: {
+    color: '#94A3B8',
+    fontSize: 12,
+  },
+  quickSimBtn: {
+    backgroundColor: '#E2550B',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
+  quickSimText: {
+    color: '#FFFFFF',
+    fontSize: 11,
+    fontWeight: '800',
+  },
+  webviewLoading: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: '#0F172A',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
 });
