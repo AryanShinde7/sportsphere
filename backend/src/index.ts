@@ -56,13 +56,14 @@ const storage = multer.diskStorage({
 });
 const upload = multer({
   storage,
-  limits: { fileSize: 5 * 1024 * 1024 }, // 5 MB max
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB max
   fileFilter: (_req, file, cb) => {
-    const allowed = ['image/jpeg', 'image/png', 'image/webp'];
-    if (allowed.includes(file.mimetype)) {
+    const isImage = file.mimetype?.startsWith('image/') || 
+      ['image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'image/gif', 'application/octet-stream'].includes(file.mimetype);
+    if (isImage) {
       cb(null, true);
     } else {
-      cb(new Error('Only JPEG, PNG, and WebP images are allowed'));
+      cb(new Error('Only image files (JPEG, PNG, WebP) are allowed'));
     }
   },
 });
@@ -369,6 +370,8 @@ app.post('/api/auth/login', async (req, res) => {
         role: user.role,
         email: user.email,
         phone: user.phone,
+        profileImageUrl: user.profileImageUrl,
+        bannerImageUrl: user.bannerImageUrl,
         athleteProfile: user.athleteProfile,
         sponsorProfile: user.sponsorProfile
       }
@@ -404,7 +407,7 @@ app.get('/api/auth/me', authenticateToken, async (req: any, res) => {
 
 // PUT /api/users/profile — update contributor/supporter profile
 app.put('/api/users/profile', authenticateToken, async (req: any, res) => {
-  const { name, phone, profileImageUrl, organizationName, organizationType, budgetRange } = req.body;
+  const { name, phone, profileImageUrl, bannerImageUrl, organizationName, organizationType, budgetRange } = req.body;
   try {
     if (organizationName || organizationType || budgetRange) {
       await prisma.sponsorProfile.upsert({
@@ -429,6 +432,7 @@ app.put('/api/users/profile', authenticateToken, async (req: any, res) => {
         ...(name && { name: name.trim() }),
         ...(phone !== undefined && { phone: phone ? phone.trim() : null }),
         ...(profileImageUrl !== undefined && { profileImageUrl }),
+        ...(bannerImageUrl !== undefined && { bannerImageUrl }),
       },
       include: {
         athleteProfile: {
@@ -450,10 +454,140 @@ app.put('/api/users/profile', authenticateToken, async (req: any, res) => {
   }
 });
 
+// POST /api/upload — general image/file upload
+app.post('/api/upload', authenticateToken, upload.single('image'), (req: any, res) => {
+  if (!req.file) {
+    return res.status(400).json({ error: 'No image file uploaded' });
+  }
+  const host = req.get('host');
+  const fullUrl = `${req.protocol}://${host}/uploads/${req.file.filename}`;
+  res.json({
+    url: `/uploads/${req.file.filename}`,
+    fullUrl,
+    filename: req.file.filename,
+    mimetype: req.file.mimetype,
+    size: req.file.size
+  });
+});
+
+// POST /api/users/profile-image — upload or set avatar for authenticated user (both roles)
+app.post('/api/users/profile-image', authenticateToken, upload.single('image'), async (req: any, res) => {
+  try {
+    let imageUrl = req.body?.imageUrl;
+    if (req.file) {
+      const host = req.get('host');
+      imageUrl = `${req.protocol}://${host}/uploads/${req.file.filename}`;
+    }
+    if (!imageUrl) {
+      return res.status(400).json({ error: 'Please provide an image file or imageUrl' });
+    }
+
+    const updatedUser = await prisma.user.update({
+      where: { id: req.user.id },
+      data: { profileImageUrl: imageUrl },
+      include: {
+        athleteProfile: {
+          include: { sport: true, mediaAssets: true }
+        },
+        sponsorProfile: true
+      }
+    });
+
+    // If user has an athlete profile, also upsert MediaAsset AVATAR
+    if (updatedUser.athleteProfile) {
+      const existing = await prisma.mediaAsset.findFirst({
+        where: { athleteId: updatedUser.athleteProfile.id, type: 'AVATAR' }
+      });
+      if (existing) {
+        await prisma.mediaAsset.update({
+          where: { id: existing.id },
+          data: { url: imageUrl }
+        });
+      } else {
+        await prisma.mediaAsset.create({
+          data: {
+            athleteId: updatedUser.athleteProfile.id,
+            type: 'AVATAR',
+            url: imageUrl,
+            order: 0
+          }
+        });
+      }
+    }
+
+    const { passwordHash, ...safeUser } = updatedUser;
+    res.json({
+      message: 'Profile photo updated successfully',
+      profileImageUrl: imageUrl,
+      user: safeUser
+    });
+  } catch (error: any) {
+    console.error('Update profile image error:', error);
+    res.status(500).json({ error: error.message || 'Failed to update profile image' });
+  }
+});
+
+// POST /api/users/banner-image — upload or set banner for authenticated user (both roles)
+app.post('/api/users/banner-image', authenticateToken, upload.single('image'), async (req: any, res) => {
+  try {
+    let bannerUrl = req.body?.bannerUrl;
+    if (req.file) {
+      const host = req.get('host');
+      bannerUrl = `${req.protocol}://${host}/uploads/${req.file.filename}`;
+    }
+    if (!bannerUrl) {
+      return res.status(400).json({ error: 'Please provide an image file or bannerUrl' });
+    }
+
+    const updatedUser = await prisma.user.update({
+      where: { id: req.user.id },
+      data: { bannerImageUrl: bannerUrl },
+      include: {
+        athleteProfile: {
+          include: { sport: true, mediaAssets: true }
+        },
+        sponsorProfile: true
+      }
+    });
+
+    // If user has an athlete profile, also upsert MediaAsset BANNER
+    if (updatedUser.athleteProfile) {
+      const existing = await prisma.mediaAsset.findFirst({
+        where: { athleteId: updatedUser.athleteProfile.id, type: 'BANNER' }
+      });
+      if (existing) {
+        await prisma.mediaAsset.update({
+          where: { id: existing.id },
+          data: { url: bannerUrl }
+        });
+      } else {
+        await prisma.mediaAsset.create({
+          data: {
+            athleteId: updatedUser.athleteProfile.id,
+            type: 'BANNER',
+            url: bannerUrl,
+            order: 0
+          }
+        });
+      }
+    }
+
+    const { passwordHash, ...safeUser } = updatedUser;
+    res.json({
+      message: 'Banner image updated successfully',
+      bannerImageUrl: bannerUrl,
+      user: safeUser
+    });
+  } catch (error: any) {
+    console.error('Update banner image error:', error);
+    res.status(500).json({ error: error.message || 'Failed to update banner image' });
+  }
+});
+
 // PUT /api/athletes/profile — update athlete profile details
 app.put('/api/athletes/profile', authenticateToken, async (req: any, res) => {
   const {
-    name, phone,
+    name, phone, profileImageUrl, bannerImageUrl,
     sportId, sportName, discipline, city, state, headline, bio,
     currentGoal, coachName, academyName
   } = req.body;
@@ -481,14 +615,60 @@ app.put('/api/athletes/profile', authenticateToken, async (req: any, res) => {
       finalSportId = customSport.id;
     }
 
-    if (name || phone !== undefined) {
+    if (name || phone !== undefined || profileImageUrl !== undefined || bannerImageUrl !== undefined) {
       await prisma.user.update({
         where: { id: req.user.id },
         data: {
           ...(name && { name: name.trim() }),
-          ...(phone !== undefined && { phone: phone ? phone.trim() : null })
+          ...(phone !== undefined && { phone: phone ? phone.trim() : null }),
+          ...(profileImageUrl !== undefined && { profileImageUrl }),
+          ...(bannerImageUrl !== undefined && { bannerImageUrl }),
         }
       });
+    }
+
+    // Sync avatar to MediaAsset
+    if (profileImageUrl) {
+      const existingAvatar = await prisma.mediaAsset.findFirst({
+        where: { athleteId: athleteProfile.id, type: 'AVATAR' }
+      });
+      if (existingAvatar) {
+        await prisma.mediaAsset.update({
+          where: { id: existingAvatar.id },
+          data: { url: profileImageUrl }
+        });
+      } else {
+        await prisma.mediaAsset.create({
+          data: {
+            athleteId: athleteProfile.id,
+            type: 'AVATAR',
+            url: profileImageUrl,
+            order: 0
+          }
+        });
+      }
+    }
+
+    // Sync banner to MediaAsset
+    if (bannerImageUrl) {
+      const existingBanner = await prisma.mediaAsset.findFirst({
+        where: { athleteId: athleteProfile.id, type: 'BANNER' }
+      });
+      if (existingBanner) {
+        await prisma.mediaAsset.update({
+          where: { id: existingBanner.id },
+          data: { url: bannerImageUrl }
+        });
+      } else {
+        await prisma.mediaAsset.create({
+          data: {
+            athleteId: athleteProfile.id,
+            type: 'BANNER',
+            url: bannerImageUrl,
+            order: 0
+          }
+        });
+      }
     }
 
     const updatedProfile = await prisma.athleteProfile.update({
@@ -505,7 +685,7 @@ app.put('/api/athletes/profile', authenticateToken, async (req: any, res) => {
         ...(academyName !== undefined && { academyName: academyName ? academyName.trim() : null }),
       },
       include: {
-        user: { select: { id: true, name: true, email: true, phone: true, role: true } },
+        user: { select: { id: true, name: true, email: true, phone: true, role: true, profileImageUrl: true, bannerImageUrl: true } },
         sport: true,
         mediaAssets: { orderBy: { order: 'asc' } },
         supportRequests: { where: { lifecycleStatus: 'ACTIVE' } }
@@ -595,7 +775,15 @@ app.get('/api/athletes', async (req, res) => {
         achievements: true,
         mediaAssets: { orderBy: { order: 'asc' } },
         supportRequests: {
-          where: { lifecycleStatus: 'ACTIVE' }
+          where: { lifecycleStatus: 'ACTIVE' },
+          orderBy: { createdAt: 'desc' },
+          include: {
+            budgetItems: true,
+            supports: {
+              where: { status: 'SUCCESS' },
+              select: { id: true, amount: true, createdAt: true, supporter: { select: { name: true } } }
+            }
+          }
         }
       }
     });
@@ -766,6 +954,12 @@ app.post('/api/support-requests', authenticateToken, async (req: any, res) => {
     }
 
     const createdRequest = await prisma.$transaction(async (tx) => {
+      // Archive any prior active campaigns for this athlete so this new campaign becomes the active one
+      await tx.supportRequest.updateMany({
+        where: { athleteId: athlete.id, lifecycleStatus: 'ACTIVE' },
+        data: { lifecycleStatus: 'ARCHIVED' }
+      });
+
       const sr = await tx.supportRequest.create({
         data: {
           athleteId: athlete.id,

@@ -19,6 +19,7 @@ model User {
   role            String   @default("SUPPORTER") // "ATHLETE", "SUPPORTER", "SPONSOR", "ADMIN"
   status          String   @default("ACTIVE")
   profileImageUrl String?
+  bannerImageUrl  String?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 

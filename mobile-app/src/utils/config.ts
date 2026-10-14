@@ -36,6 +36,21 @@ export const getApiUrl = () => {
 export const API_URL = getApiUrl();
 console.log('[Sportsphere] API_URL resolved to:', API_URL);
 
+export const resolveImageUrl = (url?: string | null): string | null => {
+  if (!url) return null;
+  if (url.startsWith('http://') || url.startsWith('https://')) {
+    if (url.includes('/uploads/')) {
+      const parts = url.split('/uploads/');
+      const filename = parts[1];
+      const base = API_URL.replace(/\/api\/?$/, '');
+      return `${base}/uploads/${filename}`;
+    }
+    return url;
+  }
+  const base = API_URL.replace(/\/api\/?$/, '');
+  return `${base}${url.startsWith('/') ? '' : '/'}${url}`;
+};
+
 export const Storage = {
   setItem: async (key: string, value: string) => {
     try {
@@ -185,11 +200,54 @@ export const mobileApi = {
       name?: string;
       phone?: string;
       profileImageUrl?: string;
+      bannerImageUrl?: string;
       organizationName?: string;
       organizationType?: string;
       budgetRange?: string;
     }) => {
       const res = await apiClient.put('/users/profile', data);
+      return res.data;
+    },
+    uploadProfileImage: async (imageUri: string, mimeType?: string, fileName?: string) => {
+      const formData = new FormData();
+      const ext = (imageUri.split('.').pop() || 'jpg').split('?')[0].toLowerCase();
+      const finalName = fileName || `avatar_${Date.now()}.${ext}`;
+      const type = mimeType || `image/${ext === 'png' ? 'png' : 'jpeg'}`;
+
+      formData.append('image', {
+        uri: imageUri,
+        name: finalName,
+        type,
+      } as any);
+
+      const token = await getAuthToken();
+      const res = await axios.post(`${API_URL}/users/profile-image`, formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+      });
+      return res.data;
+    },
+    uploadBannerImage: async (imageUri: string, mimeType?: string, fileName?: string) => {
+      const formData = new FormData();
+      const ext = (imageUri.split('.').pop() || 'jpg').split('?')[0].toLowerCase();
+      const finalName = fileName || `banner_${Date.now()}.${ext}`;
+      const type = mimeType || `image/${ext === 'png' ? 'png' : 'jpeg'}`;
+
+      formData.append('image', {
+        uri: imageUri,
+        name: finalName,
+        type,
+      } as any);
+
+      const token = await getAuthToken();
+      const res = await axios.post(`${API_URL}/users/banner-image`, formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+      });
       return res.data;
     },
     getContributions: async () => {
@@ -210,6 +268,8 @@ export const mobileApi = {
     updateProfile: async (data: {
       name?: string;
       phone?: string;
+      profileImageUrl?: string;
+      bannerImageUrl?: string;
       sportId?: number;
       sportName?: string;
       discipline?: string;

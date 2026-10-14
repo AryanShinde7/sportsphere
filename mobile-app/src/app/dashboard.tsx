@@ -7,17 +7,20 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router, useFocusEffect } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { mobileApi, Storage } from '../utils/config';
+import { mobileApi, Storage, resolveImageUrl } from '../utils/config';
+import CreateFundingRequestModal from '../components/CreateFundingRequestModal';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
-const PRIMARY   = '#E2550B';
-const BG        = '#F3F4F6';
-const CARD_BG   = '#FFFFFF';
-const BORDER    = '#E5E7EB';
-const TEXT_MAIN = '#111827';
-const TEXT_DIM  = '#4B5563';
-const TEXT_FAINT = '#9CA3AF';
+const PRIMARY       = '#E2550B';
+const PRIMARY_LIGHT = '#FFF7ED';
+const BG            = '#F3F4F6';
+const CARD_BG       = '#FFFFFF';
+const BORDER        = '#E5E7EB';
+const TEXT_MAIN     = '#111827';
+const TEXT_DIM      = '#4B5563';
+const TEXT_FAINT    = '#9CA3AF';
+const SUCCESS_GREEN = '#059669';
 
 const SPORT_ICONS: Record<string, string> = {
   Athletics: '🏃', Swimming: '🏊', Badminton: '🏸', Wrestling: '🤼',
@@ -45,25 +48,30 @@ function getColor(name: string) {
 
 function getHeroUrl(item: any): string | null {
   const assets: any[] = item.mediaAssets || [];
+  const banner  = assets.find((a: any) => a.type === 'BANNER');
   const gallery = assets.find((a: any) => a.type === 'GALLERY');
   const avatar  = assets.find((a: any) => a.type === 'AVATAR');
-  return (gallery || avatar)?.url || null;
+  const raw = (banner || gallery || avatar)?.url || item.user?.bannerImageUrl || null;
+  return resolveImageUrl(raw);
 }
 
 function getAvatarUrl(item: any): string | null {
   const assets: any[] = item.mediaAssets || [];
-  return assets.find((a: any) => a.type === 'AVATAR')?.url || null;
+  const raw = assets.find((a: any) => a.type === 'AVATAR')?.url || item.user?.profileImageUrl || null;
+  return resolveImageUrl(raw);
 }
 
 /* ─────────────────────────────────────────
-   Hero Feed Card  (Phase 7C)
+   Hero Feed Card
 ───────────────────────────────────────── */
 function AthleteCard({ item }: { item: any }) {
   const req      = item.supportRequests?.[0];
   const icon     = SPORT_ICONS[item.sport?.name] || '🏅';
   const color    = getColor(item.user?.name || 'Athlete');
   const initials = getInitials(item.user?.name || 'Athlete');
-  const pct      = req ? Math.min(Math.round((req.amountSupported / req.targetAmount) * 100), 100) : 0;
+  const pct      = req && req.targetAmount > 0
+    ? Math.min(Math.round((req.amountSupported / req.targetAmount) * 100), 100)
+    : 0;
 
   const isVerified = item.verifications?.some(
     (v: any) => v.category === 'IDENTITY' && v.status === 'VERIFIED'
@@ -96,11 +104,16 @@ function AthleteCard({ item }: { item: any }) {
           </View>
         )}
 
-        {/* Scrim gradient over bottom half */}
+        {/* Scrim gradient overlay */}
         <View style={styles.heroScrim} pointerEvents="none" />
 
-        {/* Top-right sport + verified chips */}
+        {/* Top-right badges */}
         <View style={styles.heroBadgeRow}>
+          {req && (
+            <View style={styles.liveCampaignBadge}>
+              <Text style={styles.liveCampaignText}>⚡ LIVE FUNDING</Text>
+            </View>
+          )}
           <View style={styles.sportChip}>
             <Text style={styles.sportChipText}>{icon}  {item.sport?.name}</Text>
           </View>
@@ -112,7 +125,7 @@ function AthleteCard({ item }: { item: any }) {
           )}
         </View>
 
-        {/* Bottom overlay — circular avatar + name + headline */}
+        {/* Bottom overlay — avatar + name + headline */}
         <View style={styles.heroOverlay}>
           {avatarUrl && !avatarFailed ? (
             <Image
@@ -128,40 +141,57 @@ function AthleteCard({ item }: { item: any }) {
           <View style={{ flex: 1, marginLeft: 10 }}>
             <Text style={styles.heroName} numberOfLines={1}>{item.user?.name}</Text>
             <Text style={styles.heroHeadline} numberOfLines={2}>
-              {item.headline || `${item.sport?.name}${item.discipline ? ` · ${item.discipline}` : ''} · ${item.city}, ${item.state}`}
+              {item.headline || `${item.sport?.name}${item.discipline ? ` · ${item.discipline}` : ''} · ${item.city || 'India'}, ${item.state || ''}`}
             </Text>
           </View>
         </View>
       </View>
 
-      {/* ── Compact funding bar ── */}
-      {req && (
+      {/* ── Active funding bar ── */}
+      {req ? (
         <View style={styles.fundingBar}>
+          {/* Campaign Title & Category */}
+          <View style={styles.campaignHeaderRow}>
+            <View style={styles.categoryBadge}>
+              <Text style={styles.categoryBadgeText}>{req.category || 'EQUIPMENT'}</Text>
+            </View>
+            <Text style={styles.campaignCardTitle} numberOfLines={1}>
+              {req.title}
+            </Text>
+          </View>
+
+          {/* Realtime progress meta */}
           <View style={styles.fundingMeta}>
             <Text style={styles.fundingRaised}>{inr(req.amountSupported)} raised</Text>
-            <Text style={styles.fundingPct}>{pct}%</Text>
+            <Text style={styles.fundingPct}>{pct}% funded</Text>
           </View>
+
+          {/* Progress bar track */}
           <View style={styles.fundingTrack}>
-            <View style={[styles.fundingFill, { width: `${pct}%` as any }]} />
+            <View style={[styles.fundingFill, { width: `${Math.max(pct, 2)}%` as any }]} />
           </View>
+
           <View style={styles.fundingFooter}>
-            <Text style={styles.fundingGoal}>Goal: {inr(req.targetAmount)}</Text>
+            <Text style={styles.fundingGoal}>
+              Goal: {inr(req.targetAmount)}
+              {req.supports?.length > 0 ? ` · ${req.supports.length} backer${req.supports.length > 1 ? 's' : ''}` : ''}
+            </Text>
             <TouchableOpacity
               style={styles.miniSupportBtn}
               onPress={() => router.push(`/support/${req.id}`)}
               activeOpacity={0.85}
             >
-              <Text style={styles.miniSupportBtnText}>❤️ Support</Text>
+              <Text style={styles.miniSupportBtnText}>❤️ Support with Razorpay</Text>
             </TouchableOpacity>
           </View>
         </View>
-      )}
+      ) : null}
     </TouchableOpacity>
   );
 }
 
 /* ─────────────────────────────────────────
-   Main Dashboard
+   Main Dashboard Screen
 ───────────────────────────────────────── */
 export default function DashboardScreen() {
   const insets = useSafeAreaInsets();
@@ -175,12 +205,23 @@ export default function DashboardScreen() {
   const [searchFocused, setSearchFocused] = useState(false);
   const [currentUser, setCurrentUser] = useState<any>(null);
 
+  // Funding Request Modal State
+  const [isFundingModalVisible, setIsFundingModalVisible] = useState(false);
+
   const loadUserData = async () => {
     try {
       const stored = await Storage.getItem('userData');
-      if (stored) setCurrentUser(JSON.parse(stored));
+      if (stored) {
+        setCurrentUser(JSON.parse(stored));
+      }
+      // Also fetch fresh user data from /auth/me to sync latest athleteProfile and supportRequests
+      const fresh = await mobileApi.auth.getMe();
+      if (fresh) {
+        setCurrentUser(fresh);
+        await Storage.setItem('userData', JSON.stringify(fresh));
+      }
     } catch (e) {
-      console.warn('Failed to parse userData:', e);
+      console.warn('Failed to load user data:', e);
     }
   };
 
@@ -192,12 +233,18 @@ export default function DashboardScreen() {
   useFocusEffect(
     useCallback(() => {
       fetchAthletes();
+      loadUserData();
     }, [])
   );
 
   useEffect(() => {
     let result = athletes;
-    if (activeSport !== 'All') result = result.filter(a => a.sport?.name === activeSport);
+    if (activeSport === '⚡ Needs Funding') {
+      result = result.filter(a => a.supportRequests && a.supportRequests.length > 0);
+    } else if (activeSport !== 'All') {
+      result = result.filter(a => a.sport?.name === activeSport);
+    }
+
     if (search.trim()) {
       const q = search.toLowerCase();
       result = result.filter(a =>
@@ -205,7 +252,8 @@ export default function DashboardScreen() {
         a.sport?.name?.toLowerCase().includes(q) ||
         a.discipline?.toLowerCase().includes(q) ||
         a.state?.toLowerCase().includes(q) ||
-        a.city?.toLowerCase().includes(q)
+        a.city?.toLowerCase().includes(q) ||
+        a.supportRequests?.[0]?.title?.toLowerCase().includes(q)
       );
     }
     setFiltered(result);
@@ -228,11 +276,27 @@ export default function DashboardScreen() {
   const onRefresh = useCallback(() => {
     setRefreshing(true);
     fetchAthletes();
+    loadUserData();
   }, []);
 
   const handleProfilePress = () => {
     router.push('/profile');
   };
+
+  // Athlete Detection & Active Campaign resolution
+  const isAthlete = currentUser?.role === 'ATHLETE';
+  const myAthleteProfile = currentUser?.athleteProfile;
+  const myAthleteId = myAthleteProfile?.id;
+
+  // Find active campaign from either the athlete card or current user
+  const matchingAthleteCard = athletes.find(a => a.id === myAthleteId || a.userId === currentUser?.id);
+  const myActiveCampaign =
+    matchingAthleteCard?.supportRequests?.[0] ||
+    myAthleteProfile?.supportRequests?.find((sr: any) => sr.lifecycleStatus === 'ACTIVE');
+
+  const myCampaignPct = myActiveCampaign && myActiveCampaign.targetAmount > 0
+    ? Math.min(Math.round((myActiveCampaign.amountSupported / myActiveCampaign.targetAmount) * 100), 100)
+    : 0;
 
   if (loading) {
     return (
@@ -245,13 +309,96 @@ export default function DashboardScreen() {
 
   const renderListHeader = () => (
     <View style={styles.listHeaderWrapper}>
-      {/* Search */}
+      {/* ── ATHLETE PERSONAL FUNDING BANNER / HUB ── */}
+      {isAthlete && (
+        <View style={styles.athleteHubContainer}>
+          {myActiveCampaign ? (
+            /* Active Live Campaign Card */
+            <View style={styles.liveHubCard}>
+              <View style={styles.liveHubHeader}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <View style={styles.livePulseDot} />
+                  <Text style={styles.liveHubBadge}>YOUR LIVE CAMPAIGN</Text>
+                  <View style={styles.liveCategoryChip}>
+                    <Text style={styles.liveCategoryText}>{myActiveCampaign.category || 'EQUIPMENT'}</Text>
+                  </View>
+                </View>
+                <TouchableOpacity
+                  onPress={() => router.push(`/athlete/${myAthleteId}`)}
+                  style={styles.viewCampaignBtn}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.viewCampaignBtnText}>View →</Text>
+                </TouchableOpacity>
+              </View>
+
+              <Text style={styles.liveHubTitle} numberOfLines={1}>
+                {myActiveCampaign.title}
+              </Text>
+
+              {/* Progress bar */}
+              <View style={styles.liveProgressMeta}>
+                <Text style={styles.liveRaisedText}>{inr(myActiveCampaign.amountSupported)} raised</Text>
+                <Text style={styles.livePctText}>{myCampaignPct}% of {inr(myActiveCampaign.targetAmount)}</Text>
+              </View>
+              <View style={styles.liveTrack}>
+                <View style={[styles.liveFill, { width: `${Math.max(myCampaignPct, 3)}%` as any }]} />
+              </View>
+
+              <View style={styles.liveHubFooter}>
+                <Text style={styles.liveBackerCount}>
+                  {myActiveCampaign.supports?.length || 0} community backer{(myActiveCampaign.supports?.length || 0) !== 1 ? 's' : ''}
+                </Text>
+                <TouchableOpacity
+                  style={styles.liveNewBtn}
+                  onPress={() => setIsFundingModalVisible(true)}
+                  activeOpacity={0.75}
+                >
+                  <Ionicons name="add" size={13} color={PRIMARY} />
+                  <Text style={styles.liveNewBtnText}>New Campaign</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          ) : (
+            /* Call to Action: Start Funding Request */
+            <View style={styles.startFundingCard}>
+              <View style={styles.startFundingContent}>
+                <View style={styles.startFundingIconWrap}>
+                  <Text style={{ fontSize: 24 }}>🚀</Text>
+                </View>
+                <View style={{ flex: 1, marginLeft: 12 }}>
+                  <Text style={styles.startFundingTitle}>Need Funds for Your Sport?</Text>
+                  <Text style={styles.startFundingSub}>
+                    Calculate your itemized equipment, coaching, or travel budget and raise funds from verified donors.
+                  </Text>
+                </View>
+              </View>
+
+              <TouchableOpacity
+                style={styles.startFundingActionBtn}
+                onPress={() => setIsFundingModalVisible(true)}
+                activeOpacity={0.85}
+              >
+                <Ionicons name="rocket-outline" size={16} color="#FFFFFF" style={{ marginRight: 6 }} />
+                <Text style={styles.startFundingActionText}>+ Start Funding Request</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+        </View>
+      )}
+
+      {/* Search Bar */}
       <View style={styles.searchWrap}>
         <View style={[styles.searchBarContainer, searchFocused && styles.searchFocused]}>
-          <Ionicons name="search-outline" size={16} color={searchFocused ? PRIMARY : TEXT_FAINT} style={{ marginRight: 8 }} />
+          <Ionicons
+            name="search-outline"
+            size={16}
+            color={searchFocused ? PRIMARY : TEXT_FAINT}
+            style={{ marginRight: 8 }}
+          />
           <TextInput
             style={styles.searchInput}
-            placeholder="Search athletes, sports, cities…"
+            placeholder="Search athletes, sports, campaigns, cities…"
             placeholderTextColor={TEXT_FAINT}
             value={search}
             onChangeText={setSearch}
@@ -266,29 +413,47 @@ export default function DashboardScreen() {
         </View>
       </View>
 
-      {/* Sport filter pills */}
+      {/* Filter pills (All, Needs Funding, Sports) */}
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.pillsRow}
         style={{ marginBottom: 4 }}
       >
-        {['All', ...sports].map(s => (
-          <TouchableOpacity
-            key={s}
-            style={[styles.pill, activeSport === s && styles.pillActive]}
-            onPress={() => setActiveSport(s)}
-            activeOpacity={0.75}
-          >
-            <Text style={[styles.pillText, activeSport === s && styles.pillTextActive]}>
-              {s !== 'All' && SPORT_ICONS[s] ? `${SPORT_ICONS[s]}  ` : ''}{s}
-            </Text>
-          </TouchableOpacity>
-        ))}
+        {['All', '⚡ Needs Funding', ...sports].map(s => {
+          const isActive = activeSport === s;
+          const isFundingTab = s === '⚡ Needs Funding';
+          return (
+            <TouchableOpacity
+              key={s}
+              style={[
+                styles.pill,
+                isActive && styles.pillActive,
+                isFundingTab && !isActive && styles.pillFundingHighlight,
+              ]}
+              onPress={() => setActiveSport(s)}
+              activeOpacity={0.75}
+            >
+              <Text
+                style={[
+                  styles.pillText,
+                  isActive && styles.pillTextActive,
+                  isFundingTab && !isActive && styles.pillFundingText,
+                ]}
+              >
+                {s !== 'All' && s !== '⚡ Needs Funding' && SPORT_ICONS[s]
+                  ? `${SPORT_ICONS[s]}  `
+                  : ''}
+                {s}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
       </ScrollView>
 
       <Text style={styles.count}>
-        {filtered.length} {filtered.length === 1 ? 'athlete' : 'athletes'} in community
+        {filtered.length} {filtered.length === 1 ? 'athlete' : 'athletes'}
+        {activeSport === '⚡ Needs Funding' ? ' actively raising funds' : ' in community'}
       </Text>
     </View>
   );
@@ -307,25 +472,51 @@ export default function DashboardScreen() {
             </View>
             <Text style={styles.headerSub}>Verified Athlete Community</Text>
           </View>
-          <TouchableOpacity
-            style={styles.profileHeaderBtn}
-            onPress={() => router.push('/profile')}
-            activeOpacity={0.8}
-          >
-            <View style={styles.profileAvatarMini}>
-              <Text style={styles.profileAvatarMiniText}>{getInitials(currentUser?.name || 'User')}</Text>
-            </View>
-          </TouchableOpacity>
+
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+            {isAthlete && (
+              <TouchableOpacity
+                style={styles.quickFundingBtn}
+                onPress={() => setIsFundingModalVisible(true)}
+                activeOpacity={0.8}
+              >
+                <Ionicons name="add" size={14} color="#FFFFFF" />
+                <Text style={styles.quickFundingBtnText}>Request Fund</Text>
+              </TouchableOpacity>
+            )}
+
+            <TouchableOpacity
+              style={styles.profileHeaderBtn}
+              onPress={() => router.push('/profile')}
+              activeOpacity={0.8}
+            >
+              {currentUser?.profileImageUrl ? (
+                <Image
+                  source={{ uri: resolveImageUrl(currentUser.profileImageUrl)! }}
+                  style={styles.profileAvatarMini}
+                />
+              ) : (
+                <View style={styles.profileAvatarMini}>
+                  <Text style={styles.profileAvatarMiniText}>
+                    {getInitials(currentUser?.name || 'User')}
+                  </Text>
+                </View>
+              )}
+            </TouchableOpacity>
+          </View>
         </View>
       </View>
 
-      {/* Feed */}
+      {/* Community Feed */}
       <FlatList
         data={filtered}
         keyExtractor={item => item.id.toString()}
         renderItem={({ item }) => <AthleteCard item={item} />}
         ListHeaderComponent={renderListHeader}
-        contentContainerStyle={[styles.listContainer, { paddingBottom: 80 + Math.max(insets.bottom, 16) }]}
+        contentContainerStyle={[
+          styles.listContainer,
+          { paddingBottom: 80 + Math.max(insets.bottom, 16) },
+        ]}
         showsVerticalScrollIndicator={false}
         refreshControl={
           <RefreshControl
@@ -339,7 +530,11 @@ export default function DashboardScreen() {
           <View style={styles.emptyState}>
             <Text style={styles.emptyIcon}>🏅</Text>
             <Text style={styles.emptyTitle}>No athletes found</Text>
-            <Text style={styles.emptySub}>Try searching for a different sport or state.</Text>
+            <Text style={styles.emptySub}>
+              {activeSport === '⚡ Needs Funding'
+                ? 'No athletes currently raising funds. Check back soon or start your own request!'
+                : 'Try searching for a different sport, athlete name, or city.'}
+            </Text>
           </View>
         }
       />
@@ -351,9 +546,19 @@ export default function DashboardScreen() {
             <Ionicons name="flash" size={20} color={PRIMARY} />
             <Text style={[styles.navLabel, { color: PRIMARY, fontWeight: '800' }]}>Feed</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.navItem} onPress={() => alert('Verification badge system is live!')} activeOpacity={0.7}>
-            <Ionicons name="shield-checkmark-outline" size={20} color={TEXT_DIM} />
-            <Text style={styles.navLabel}>Verify</Text>
+          <TouchableOpacity
+            style={styles.navItem}
+            onPress={() => {
+              if (isAthlete) {
+                setIsFundingModalVisible(true);
+              } else {
+                setActiveSport('⚡ Needs Funding');
+              }
+            }}
+            activeOpacity={0.7}
+          >
+            <Ionicons name="rocket-outline" size={20} color={TEXT_DIM} />
+            <Text style={styles.navLabel}>{isAthlete ? 'Raise Fund' : 'Campaigns'}</Text>
           </TouchableOpacity>
           <TouchableOpacity style={styles.navItem} onPress={handleProfilePress} activeOpacity={0.7}>
             <Ionicons name="person-circle-outline" size={22} color={TEXT_DIM} />
@@ -361,6 +566,18 @@ export default function DashboardScreen() {
           </TouchableOpacity>
         </View>
       </View>
+
+      {/* Funding Request Modal */}
+      <CreateFundingRequestModal
+        visible={isFundingModalVisible}
+        onClose={() => setIsFundingModalVisible(false)}
+        onSuccess={() => {
+          fetchAthletes();
+          loadUserData();
+        }}
+        athleteName={currentUser?.name || 'Athlete'}
+        sportName={currentUser?.athleteProfile?.sport?.name || 'Sport'}
+      />
     </View>
   );
 }
@@ -391,6 +608,21 @@ const styles = StyleSheet.create({
   logoW:     { fontSize: 20, fontWeight: '900', color: TEXT_MAIN, letterSpacing: -0.8, fontStyle: 'italic' },
   logoA:     { fontSize: 20, fontWeight: '900', color: PRIMARY,   letterSpacing: -0.8, fontStyle: 'italic' },
   headerSub: { fontSize: 9.5, fontWeight: '700', color: TEXT_FAINT, textTransform: 'uppercase', letterSpacing: 0.8, marginTop: 1 },
+
+  quickFundingBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: PRIMARY,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 20,
+    gap: 3,
+  },
+  quickFundingBtnText: {
+    color: '#FFFFFF',
+    fontSize: 11,
+    fontWeight: '800',
+  },
   profileHeaderBtn: {
     padding: 2,
   },
@@ -415,9 +647,174 @@ const styles = StyleSheet.create({
     fontWeight: '900',
   },
 
+  // ── Athlete Personal Funding Hub / Cards ──
+  athleteHubContainer: {
+    paddingHorizontal: 12,
+    marginBottom: 10,
+  },
+  startFundingCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    borderWidth: 1.5,
+    borderColor: '#FED7AA',
+    padding: 14,
+    shadowColor: PRIMARY,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 6,
+    elevation: 2,
+  },
+  startFundingContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  startFundingIconWrap: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: PRIMARY_LIGHT,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  startFundingTitle: {
+    fontSize: 14.5,
+    fontWeight: '900',
+    color: TEXT_MAIN,
+  },
+  startFundingSub: {
+    fontSize: 11,
+    color: TEXT_DIM,
+    marginTop: 2,
+    lineHeight: 15,
+  },
+  startFundingActionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: PRIMARY,
+    paddingVertical: 10,
+    borderRadius: 12,
+  },
+  startFundingActionText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '800',
+    letterSpacing: 0.3,
+  },
+
+  // Live Pinned Hub Card
+  liveHubCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    borderWidth: 1.5,
+    borderColor: '#CBD5E1',
+    padding: 14,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 6,
+    elevation: 2,
+  },
+  liveHubHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  livePulseDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#059669',
+  },
+  liveHubBadge: {
+    fontSize: 10,
+    fontWeight: '900',
+    color: '#059669',
+    letterSpacing: 0.5,
+  },
+  liveCategoryChip: {
+    backgroundColor: '#F3F4F6',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 8,
+  },
+  liveCategoryText: {
+    fontSize: 9.5,
+    fontWeight: '800',
+    color: TEXT_DIM,
+  },
+  viewCampaignBtn: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    backgroundColor: PRIMARY_LIGHT,
+  },
+  viewCampaignBtnText: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: PRIMARY,
+  },
+  liveHubTitle: {
+    fontSize: 14,
+    fontWeight: '900',
+    color: TEXT_MAIN,
+    marginBottom: 8,
+  },
+  liveProgressMeta: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  liveRaisedText: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: PRIMARY,
+  },
+  livePctText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: TEXT_DIM,
+  },
+  liveTrack: {
+    height: 6,
+    backgroundColor: '#F1F5F9',
+    borderRadius: 3,
+    overflow: 'hidden',
+    marginBottom: 8,
+  },
+  liveFill: {
+    height: '100%',
+    backgroundColor: PRIMARY,
+    borderRadius: 3,
+  },
+  liveHubFooter: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  liveBackerCount: {
+    fontSize: 11,
+    color: TEXT_FAINT,
+    fontWeight: '600',
+  },
+  liveNewBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    paddingVertical: 2,
+  },
+  liveNewBtnText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: PRIMARY,
+  },
+
   // Search + pills
   listHeaderWrapper:  { width: '100%', maxWidth: 500, alignSelf: 'center', paddingTop: 10, paddingBottom: 4 },
-  searchWrap:         { paddingHorizontal: 14, marginBottom: 8 },
+  searchWrap:         { paddingHorizontal: 12, marginBottom: 8 },
   searchBarContainer: {
     flexDirection: 'row', alignItems: 'center',
     backgroundColor: CARD_BG, borderWidth: 1, borderColor: BORDER,
@@ -426,16 +823,17 @@ const styles = StyleSheet.create({
     shadowColor: '#000', shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.02, shadowRadius: 2, elevation: 1,
   },
-  searchIcon:    { fontSize: 13, marginRight: 8 },
   searchInput:   { flex: 1, color: TEXT_MAIN, fontSize: 13.5, fontWeight: '500', padding: 0 },
   clearBtn:      { padding: 4 },
   searchFocused: { borderColor: PRIMARY },
-  pillsRow:      { gap: 6, paddingHorizontal: 14, paddingVertical: 4, alignItems: 'center' },
+  pillsRow:      { gap: 6, paddingHorizontal: 12, paddingVertical: 4, alignItems: 'center' },
   pill:          { paddingHorizontal: 12, paddingVertical: 7, borderRadius: 16, backgroundColor: CARD_BG, borderWidth: 1, borderColor: BORDER },
   pillActive:    { backgroundColor: TEXT_MAIN, borderColor: TEXT_MAIN },
+  pillFundingHighlight: { backgroundColor: PRIMARY_LIGHT, borderColor: '#FED7AA' },
+  pillFundingText:      { color: PRIMARY, fontWeight: '800' },
   pillText:      { fontSize: 11.5, fontWeight: '700', color: TEXT_DIM },
   pillTextActive:{ color: '#fff' },
-  count:         { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 4, fontSize: 11.5, fontWeight: '600', color: TEXT_FAINT },
+  count:         { paddingHorizontal: 14, paddingTop: 8, paddingBottom: 4, fontSize: 11.5, fontWeight: '600', color: TEXT_FAINT },
   listContainer: { width: '100%', maxWidth: 500, alignSelf: 'center' },
 
   // ── Hero Card ──
@@ -473,7 +871,6 @@ const styles = StyleSheet.create({
     color: 'rgba(255,255,255,0.35)',
   },
 
-  // Dark scrim — gradient effect using two overlapping semi-transparent views
   heroScrim: {
     position: 'absolute',
     bottom: 0,
@@ -481,9 +878,6 @@ const styles = StyleSheet.create({
     right: 0,
     height: '65%',
     backgroundColor: 'transparent',
-    // React Native doesn't support CSS gradients in StyleSheet.
-    // We fake a gradient with a solid-to-transparent black overlay.
-    // The View has a very dark bottom half only.
   },
 
   heroBadgeRow: {
@@ -493,6 +887,18 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 6,
     alignItems: 'center',
+  },
+  liveCampaignBadge: {
+    backgroundColor: PRIMARY,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 20,
+  },
+  liveCampaignText: {
+    color: '#FFFFFF',
+    fontSize: 9.5,
+    fontWeight: '900',
+    letterSpacing: 0.5,
   },
   sportChip: {
     backgroundColor: 'rgba(0,0,0,0.55)',
@@ -535,11 +941,39 @@ const styles = StyleSheet.create({
   heroName:           { color: '#fff', fontSize: 16, fontWeight: '900', letterSpacing: -0.3 },
   heroHeadline:       { color: 'rgba(255,255,255,0.8)', fontSize: 11.5, fontWeight: '500', marginTop: 2, lineHeight: 15 },
 
-  // ── Compact funding bar ──
+  // ── Active funding bar ──
   fundingBar: {
     padding: 12,
     paddingTop: 10,
     backgroundColor: CARD_BG,
+    borderTopWidth: 1,
+    borderTopColor: '#F3F4F6',
+  },
+  campaignHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 6,
+  },
+  categoryBadge: {
+    backgroundColor: PRIMARY_LIGHT,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#FED7AA',
+  },
+  categoryBadgeText: {
+    fontSize: 9.5,
+    fontWeight: '800',
+    color: PRIMARY,
+    textTransform: 'uppercase',
+  },
+  campaignCardTitle: {
+    fontSize: 12.5,
+    fontWeight: '800',
+    color: TEXT_MAIN,
+    flex: 1,
   },
   fundingMeta: {
     flexDirection: 'row',
@@ -550,7 +984,7 @@ const styles = StyleSheet.create({
   fundingRaised: { fontSize: 12, fontWeight: '800', color: TEXT_MAIN },
   fundingPct:    { fontSize: 12, fontWeight: '900', color: PRIMARY },
   fundingTrack: {
-    height: 5,
+    height: 6,
     backgroundColor: '#F3F4F6',
     borderRadius: 3,
     overflow: 'hidden',
@@ -569,17 +1003,17 @@ const styles = StyleSheet.create({
   fundingGoal:    { fontSize: 11, color: TEXT_FAINT, fontWeight: '500' },
   miniSupportBtn: {
     backgroundColor: PRIMARY,
-    paddingHorizontal: 14,
+    paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 20,
   },
-  miniSupportBtnText: { color: '#fff', fontSize: 11.5, fontWeight: '800' },
+  miniSupportBtnText: { color: '#fff', fontSize: 11, fontWeight: '800' },
 
   // Empty state
-  emptyState: { alignItems: 'center', paddingTop: 40, paddingBottom: 30 },
+  emptyState: { alignItems: 'center', paddingTop: 40, paddingBottom: 30, paddingHorizontal: 20 },
   emptyIcon:  { fontSize: 40, marginBottom: 8 },
   emptyTitle: { fontSize: 15, fontWeight: '800', color: TEXT_MAIN },
-  emptySub:   { fontSize: 12, color: TEXT_DIM, marginTop: 2 },
+  emptySub:   { fontSize: 12, color: TEXT_DIM, marginTop: 4, textAlign: 'center', lineHeight: 16 },
 
   // Bottom Nav
   bottomNav: {
@@ -589,7 +1023,5 @@ const styles = StyleSheet.create({
   },
   navContainer: { width: '100%', maxWidth: 500, height: 52, flexDirection: 'row', justifyContent: 'space-around', alignItems: 'center' },
   navItem:      { alignItems: 'center', justifyContent: 'center', paddingHorizontal: 16, paddingVertical: 4 },
-  navIcon:      { fontSize: 16, marginBottom: 1 },
-  navAvatar:    { width: 20, height: 20, borderRadius: 10, borderWidth: 1.5, borderColor: PRIMARY, marginBottom: 1 },
   navLabel:     { fontSize: 9.5, fontWeight: '600', color: TEXT_FAINT },
 });
