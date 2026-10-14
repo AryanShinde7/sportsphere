@@ -30,6 +30,13 @@ export default function Layout() {
           headerBackTitle: 'Back',
         }}
       />
+      <Stack.Screen
+        name="profile"
+        options={{
+          title: 'My Profile',
+          headerBackTitle: 'Back',
+        }}
+      />
     </Stack>
   );
 }

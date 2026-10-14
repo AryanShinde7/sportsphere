@@ -1,11 +1,14 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, FlatList,
   TouchableOpacity, ActivityIndicator, Image, TextInput,
-  Dimensions,
+  Dimensions, Modal, Alert
 } from 'react-native';
 import { useLocalSearchParams, router, useFocusEffect } from 'expo-router';
-import { mobileApi } from '../../utils/config';
+import Ionicons from '@expo/vector-icons/Ionicons';
+import { mobileApi, Storage } from '../../utils/config';
+import SportSearchPicker from '../../components/SportSearchPicker';
+import CreateFundingRequestModal from '../../components/CreateFundingRequestModal';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -40,9 +43,31 @@ const AVATAR_SIZE   = 88;
 export default function AthleteProfileScreen() {
   const { id } = useLocalSearchParams();
   const [athlete,       setAthlete]       = useState<any>(null);
+  const [currentUser,   setCurrentUser]   = useState<any>(null);
   const [loading,       setLoading]       = useState(true);
   const [bannerFailed,  setBannerFailed]  = useState(false);
   const [avatarFailed,  setAvatarFailed]  = useState(false);
+
+  // Edit Athlete Modal State
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [editName, setEditName] = useState('');
+  const [editPhone, setEditPhone] = useState('');
+  const [editSportId, setEditSportId] = useState<number | null>(null);
+  const [editSportName, setEditSportName] = useState('');
+  const [editDiscipline, setEditDiscipline] = useState('');
+  const [editState, setEditState] = useState('');
+  const [editCity, setEditCity] = useState('');
+  const [editHeadline, setEditHeadline] = useState('');
+  const [editGoal, setEditGoal] = useState('');
+  const [editBio, setEditBio] = useState('');
+  const [editCoach, setEditCoach] = useState('');
+  const [editAcademy, setEditAcademy] = useState('');
+  const [editSaving, setEditSaving] = useState(false);
+  const [editError, setEditError] = useState('');
+  const [editSuccess, setEditSuccess] = useState('');
+
+  // Create Campaign Modal State
+  const [isCreateCampaignOpen, setIsCreateCampaignOpen] = useState(false);
 
   // Sponsorship form state
   const [showSponsorForm,  setShowSponsorForm]  = useState(false);
@@ -59,8 +84,98 @@ export default function AthleteProfileScreen() {
   useFocusEffect(
     useCallback(() => {
       fetchAthlete();
+      loadCurrentUser();
     }, [id])
   );
+
+  const loadCurrentUser = async () => {
+    try {
+      const data = await Storage.getItem('userData');
+      if (data) setCurrentUser(JSON.parse(data));
+    } catch (e) {
+      console.warn('Failed to load current user:', e);
+    }
+  };
+
+  const isOwner = currentUser?.athleteProfile?.id === athlete?.id || currentUser?.id === athlete?.userId;
+
+  const openEditModal = () => {
+    setEditName(athlete.user?.name || '');
+    setEditPhone(athlete.user?.phone || '');
+    setEditSportId(athlete.sportId || athlete.sport?.id || null);
+    setEditSportName(athlete.sport?.name || '');
+    setEditDiscipline(athlete.discipline || '');
+    setEditState(athlete.state || '');
+    setEditCity(athlete.city || '');
+    setEditHeadline(athlete.headline || '');
+    setEditGoal(athlete.currentGoal || '');
+    setEditBio(athlete.bio || '');
+    setEditCoach(athlete.coachName || '');
+    setEditAcademy(athlete.academyName || '');
+    setEditError('');
+    setEditSuccess('');
+    setIsEditModalOpen(true);
+  };
+
+  const handleSaveAthleteProfile = async () => {
+    setEditError('');
+    setEditSuccess('');
+    if (!editName.trim()) {
+      setEditError('Name is required');
+      return;
+    }
+    setEditSaving(true);
+    try {
+      const res = await mobileApi.athletes.updateProfile({
+        name: editName.trim(),
+        phone: editPhone.trim() || undefined,
+        sportId: editSportId || undefined,
+        sportName: editSportName || undefined,
+        discipline: editDiscipline.trim(),
+        state: editState.trim(),
+        city: editCity.trim(),
+        headline: editHeadline.trim(),
+        currentGoal: editGoal.trim(),
+        bio: editBio.trim(),
+        coachName: editCoach.trim(),
+        academyName: editAcademy.trim(),
+      });
+      setAthlete(res.athlete);
+      if (currentUser) {
+        const updatedUser = { ...currentUser, name: editName.trim(), athleteProfile: res.athlete };
+        setCurrentUser(updatedUser);
+        await Storage.setItem('userData', JSON.stringify(updatedUser));
+      }
+      setEditSuccess('Profile updated successfully!');
+      setTimeout(() => {
+        setIsEditModalOpen(false);
+        setEditSuccess('');
+      }, 700);
+    } catch (err: any) {
+      setEditError(err.response?.data?.error || 'Failed to update athlete profile');
+    } finally {
+      setEditSaving(false);
+    }
+  };
+
+  const handleLogout = async () => {
+    Alert.alert(
+      'Log Out',
+      'Are you sure you want to log out of SportSphere?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Log Out',
+          style: 'destructive',
+          onPress: async () => {
+            await Storage.removeItem('userToken');
+            await Storage.removeItem('userData');
+            router.replace('/');
+          },
+        },
+      ]
+    );
+  };
 
   const fetchAthlete = async () => {
     try {
@@ -184,10 +299,27 @@ export default function AthleteProfileScreen() {
             <Text style={styles.name}>{athlete.user.name}</Text>
             {isVerified && (
               <View style={styles.verifiedBadge}>
-                <Text style={styles.verifiedBadgeText}>✓</Text>
+                <Ionicons name="checkmark-circle" size={14} color="#059669" />
               </View>
             )}
           </View>
+
+          {isOwner && (
+            <View style={{ flexDirection: 'row', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
+              <TouchableOpacity style={styles.ownerEditBtn} onPress={openEditModal} activeOpacity={0.8}>
+                <Ionicons name="create-outline" size={15} color={PRIMARY} style={{ marginRight: 5 }} />
+                <Text style={styles.ownerEditBtnText}>Edit Profile</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.ownerEditBtn, { borderColor: PRIMARY, backgroundColor: PRIMARY }]}
+                onPress={() => setIsCreateCampaignOpen(true)}
+                activeOpacity={0.8}
+              >
+                <Ionicons name="rocket-outline" size={15} color="#FFFFFF" style={{ marginRight: 5 }} />
+                <Text style={[styles.ownerEditBtnText, { color: '#FFFFFF' }]}>+ Request Funding</Text>
+              </TouchableOpacity>
+            </View>
+          )}
 
           {athlete.headline ? (
             <Text style={styles.headline}>{athlete.headline}</Text>
@@ -196,7 +328,10 @@ export default function AthleteProfileScreen() {
           <Text style={styles.sportMeta}>
             {athlete.sport?.name}{athlete.discipline ? ` · ${athlete.discipline}` : ''}
           </Text>
-          <Text style={styles.locationMeta}>📍 {athlete.city}, {athlete.state}</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 2 }}>
+            <Ionicons name="location-outline" size={13} color={TEXT_DIM} style={{ marginRight: 3 }} />
+            <Text style={styles.locationMeta}>{athlete.city || 'India'}, {athlete.state || ''}</Text>
+          </View>
         </View>
       </View>
 
@@ -248,19 +383,37 @@ export default function AthleteProfileScreen() {
         </View>
 
         {/* Active Campaign */}
-        {activeRequest && (
+        {activeRequest ? (
           <View style={styles.campaignSection}>
-            <Text style={styles.campaignLabel}>ACTIVE CAMPAIGN</Text>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+              <Text style={styles.campaignLabel}>ACTIVE CAMPAIGN</Text>
+              {activeRequest.category && (
+                <View style={styles.campaignCatBadge}>
+                  <Text style={styles.campaignCatText}>{activeRequest.category}</Text>
+                </View>
+              )}
+            </View>
             <Text style={styles.campaignTitle}>{activeRequest.title}</Text>
             <Text style={[styles.text, { marginTop: 4 }]}>{activeRequest.description}</Text>
+
+            {/* Document proof badge if attached */}
+            <View style={styles.proofBadge}>
+              <Ionicons name="document-text-outline" size={14} color="#059669" />
+              <Text style={styles.proofBadgeText}>
+                {activeRequest.budgetItems?.some((b: any) => b.evidenceFileId)
+                  ? 'Official Proof & Documentation Attached'
+                  : 'Verified Community Campaign · Public Ledger'}
+              </Text>
+            </View>
 
             {/* Budget breakdown */}
             {activeRequest.budgetItems?.length > 0 && (
               <View style={styles.budgetList}>
+                <Text style={styles.budgetHeaderTitle}>Itemized Budget Breakdown</Text>
                 {activeRequest.budgetItems.map((item: any) => (
                   <View key={item.id} style={styles.budgetRow}>
                     <Text style={styles.budgetDesc}>{item.description}</Text>
-                    <Text style={styles.budgetAmt}>₹{item.amount}</Text>
+                    <Text style={styles.budgetAmt}>₹{item.amount?.toLocaleString('en-IN')}</Text>
                   </View>
                 ))}
               </View>
@@ -275,13 +428,18 @@ export default function AthleteProfileScreen() {
               <View style={styles.progressTrack}>
                 <View style={[styles.progressFill, { width: `${pct}%` as any }]} />
               </View>
-              <Text style={styles.progressGoal}>Goal: {inr(activeRequest.targetAmount)}</Text>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 4 }}>
+                <Text style={styles.progressGoal}>Goal: {inr(activeRequest.targetAmount)}</Text>
+                <Text style={styles.progressRemaining}>
+                  {inr(Math.max(0, activeRequest.targetAmount - activeRequest.amountSupported))} needed
+                </Text>
+              </View>
             </View>
 
             {/* Backers wall (last 5) */}
             {activeRequest.supports?.length > 0 && (
               <View style={styles.backersWrap}>
-                <Text style={styles.backersLabel}>Recent Backers</Text>
+                <Text style={styles.backersLabel}>Recent Backers ({activeRequest.supports.length})</Text>
                 {activeRequest.supports.map((s: any, idx: number) => (
                   <View key={s.id ?? idx} style={styles.backerRow}>
                     <View style={[styles.backerAvatar, { backgroundColor: getColor(s.supporter?.name || '?') }]}>
@@ -303,9 +461,29 @@ export default function AthleteProfileScreen() {
               onPress={() => router.push(`/support/${activeRequest.id}`)}
               activeOpacity={0.85}
             >
-              <Text style={styles.supportBtnText}>SUPPORT THIS ATHLETE →</Text>
+              <Ionicons name="card-outline" size={17} color="#FFFFFF" style={{ marginRight: 6 }} />
+              <Text style={styles.supportBtnText}>SUPPORT WITH RAZORPAY →</Text>
             </TouchableOpacity>
           </View>
+        ) : (
+          isOwner && (
+            <View style={styles.noCampaignCard}>
+              <View style={styles.noCampaignIconWrap}>
+                <Ionicons name="cash-outline" size={24} color={PRIMARY} />
+              </View>
+              <Text style={styles.noCampaignTitle}>No Active Funding Campaign</Text>
+              <Text style={styles.noCampaignSub}>
+                Start a funding campaign to raise verified backing for equipment, tournament travel, or training.
+              </Text>
+              <TouchableOpacity
+                style={styles.noCampaignBtn}
+                onPress={() => setIsCreateCampaignOpen(true)}
+                activeOpacity={0.85}
+              >
+                <Text style={styles.noCampaignBtnText}>+ START FUNDING CAMPAIGN</Text>
+              </TouchableOpacity>
+            </View>
+          )
         )}
 
         {/* Corporate Sponsorship */}
@@ -411,7 +589,202 @@ export default function AthleteProfileScreen() {
             </View>
           )}
         </View>
+
+        {/* ─── OWNER LOGOUT BUTTON (Requirement 2) ─── */}
+        {isOwner && (
+          <View style={styles.logoutWrapper}>
+            <TouchableOpacity style={styles.ownerLogoutBtn} onPress={handleLogout} activeOpacity={0.85}>
+              <Ionicons name="log-out-outline" size={18} color="#DC2626" style={{ marginRight: 6 }} />
+              <Text style={styles.ownerLogoutText}>LOG OUT OF SPORTSPHERE</Text>
+            </TouchableOpacity>
+          </View>
+        )}
       </View>
+
+      {/* ─── EDIT ATHLETE PROFILE MODAL ─── */}
+      <Modal
+        visible={isEditModalOpen}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setIsEditModalOpen(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContainer}>
+            <View style={styles.modalHeader}>
+              <View>
+                <Text style={styles.modalTitle}>Edit Athlete Profile</Text>
+                <Text style={styles.modalSubtitle}>Update your sport, story and goals</Text>
+              </View>
+              <TouchableOpacity onPress={() => setIsEditModalOpen(false)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                <Ionicons name="close" size={24} color={TEXT_DIM} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView style={styles.modalScroll} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+              {editError ? (
+                <View style={styles.modalErrorBox}>
+                  <Text style={styles.modalErrorText}>⚠ {editError}</Text>
+                </View>
+              ) : null}
+
+              {editSuccess ? (
+                <View style={styles.modalSuccessBox}>
+                  <Text style={styles.modalSuccessText}>✓ {editSuccess}</Text>
+                </View>
+              ) : null}
+
+              <View style={styles.modalField}>
+                <Text style={styles.modalLabel}>FULL NAME *</Text>
+                <TextInput
+                  style={styles.modalInput}
+                  value={editName}
+                  onChangeText={setEditName}
+                  placeholder="Your full name"
+                  placeholderTextColor={TEXT_FAINT}
+                />
+              </View>
+
+              <View style={styles.modalField}>
+                <Text style={styles.modalLabel}>PHONE NUMBER</Text>
+                <TextInput
+                  style={styles.modalInput}
+                  value={editPhone}
+                  onChangeText={setEditPhone}
+                  placeholder="10-digit phone number"
+                  placeholderTextColor={TEXT_FAINT}
+                  keyboardType="phone-pad"
+                />
+              </View>
+
+              {/* Requirement 4: Searchable Sport Picker + Custom Sport Creation */}
+              <View style={styles.modalField}>
+                <SportSearchPicker
+                  selectedSportId={editSportId}
+                  selectedSportName={editSportName}
+                  onSelectSport={(sport) => {
+                    setEditSportId(sport.id);
+                    setEditSportName(sport.name);
+                  }}
+                />
+              </View>
+
+              <View style={styles.modalField}>
+                <Text style={styles.modalLabel}>DISCIPLINE / EVENT *</Text>
+                <TextInput
+                  style={styles.modalInput}
+                  value={editDiscipline}
+                  onChangeText={setEditDiscipline}
+                  placeholder="e.g. 100m Sprint, Flyweight"
+                  placeholderTextColor={TEXT_FAINT}
+                />
+              </View>
+
+              <View style={{ flexDirection: 'row', gap: 10 }}>
+                <View style={[styles.modalField, { flex: 1 }]}>
+                  <Text style={styles.modalLabel}>STATE</Text>
+                  <TextInput
+                    style={styles.modalInput}
+                    value={editState}
+                    onChangeText={setEditState}
+                    placeholder="State"
+                    placeholderTextColor={TEXT_FAINT}
+                  />
+                </View>
+                <View style={[styles.modalField, { flex: 1 }]}>
+                  <Text style={styles.modalLabel}>CITY</Text>
+                  <TextInput
+                    style={styles.modalInput}
+                    value={editCity}
+                    onChangeText={setEditCity}
+                    placeholder="City"
+                    placeholderTextColor={TEXT_FAINT}
+                  />
+                </View>
+              </View>
+
+              <View style={styles.modalField}>
+                <Text style={styles.modalLabel}>PROFILE HEADLINE</Text>
+                <TextInput
+                  style={styles.modalInput}
+                  value={editHeadline}
+                  onChangeText={setEditHeadline}
+                  placeholder="e.g. State Gold Medalist | Target: 2028 Olympics"
+                  placeholderTextColor={TEXT_FAINT}
+                />
+              </View>
+
+              <View style={styles.modalField}>
+                <Text style={styles.modalLabel}>CURRENT GOAL</Text>
+                <TextInput
+                  style={styles.modalInput}
+                  value={editGoal}
+                  onChangeText={setEditGoal}
+                  placeholder="e.g. Qualify for National Games 2026"
+                  placeholderTextColor={TEXT_FAINT}
+                />
+              </View>
+
+              <View style={styles.modalField}>
+                <Text style={styles.modalLabel}>ABOUT / STORY</Text>
+                <TextInput
+                  style={[styles.modalInput, { height: 75, textAlignVertical: 'top' }]}
+                  value={editBio}
+                  onChangeText={setEditBio}
+                  placeholder="Tell supporters your story..."
+                  placeholderTextColor={TEXT_FAINT}
+                  multiline
+                />
+              </View>
+
+              <View style={{ flexDirection: 'row', gap: 10 }}>
+                <View style={[styles.modalField, { flex: 1 }]}>
+                  <Text style={styles.modalLabel}>COACH NAME</Text>
+                  <TextInput
+                    style={styles.modalInput}
+                    value={editCoach}
+                    onChangeText={setEditCoach}
+                    placeholder="Coach name"
+                    placeholderTextColor={TEXT_FAINT}
+                  />
+                </View>
+                <View style={[styles.modalField, { flex: 1 }]}>
+                  <Text style={styles.modalLabel}>ACADEMY</Text>
+                  <TextInput
+                    style={styles.modalInput}
+                    value={editAcademy}
+                    onChangeText={setEditAcademy}
+                    placeholder="Academy / Club"
+                    placeholderTextColor={TEXT_FAINT}
+                  />
+                </View>
+              </View>
+
+              <TouchableOpacity
+                style={[styles.modalSaveBtn, editSaving && { opacity: 0.7 }]}
+                onPress={handleSaveAthleteProfile}
+                disabled={editSaving}
+                activeOpacity={0.85}
+              >
+                {editSaving ? (
+                  <ActivityIndicator color="#fff" size="small" />
+                ) : (
+                  <Text style={styles.modalSaveBtnText}>SAVE PROFILE CHANGES</Text>
+                )}
+              </TouchableOpacity>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Create Funding Campaign Modal */}
+      <CreateFundingRequestModal
+        visible={isCreateCampaignOpen}
+        onClose={() => setIsCreateCampaignOpen(false)}
+        onSuccess={() => {
+          setIsCreateCampaignOpen(false);
+          fetchAthlete();
+        }}
+      />
     </ScrollView>
   );
 }
@@ -539,12 +912,100 @@ const styles = StyleSheet.create({
   backerName:     { fontSize: 13, fontWeight: '700', color: TEXT_MAIN },
   backerAmt:      { fontSize: 11.5, color: TEXT_FAINT, fontWeight: '500' },
 
-  supportBtn: {
+    supportBtn: {
+    flexDirection: 'row',
+    justifyContent: 'center',
     backgroundColor: PRIMARY, paddingVertical: 14, borderRadius: 12,
     alignItems: 'center', marginTop: 16,
     shadowColor: PRIMARY, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.25, shadowRadius: 10, elevation: 5,
   },
   supportBtnText: { color: '#fff', fontWeight: '900', fontSize: 13.5, letterSpacing: 0.8 },
+  campaignCatBadge: {
+    backgroundColor: '#FFE4E6',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  campaignCatText: {
+    color: '#E11D48',
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+  },
+  proofBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#ECFDF5',
+    borderWidth: 1,
+    borderColor: '#A7F3D0',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    marginTop: 8,
+  },
+  proofBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#059669',
+  },
+  budgetHeaderTitle: {
+    fontSize: 11.5,
+    fontWeight: '800',
+    color: TEXT_MAIN,
+    marginBottom: 6,
+  },
+  progressRemaining: {
+    color: PRIMARY,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  noCampaignCard: {
+    marginTop: 20,
+    marginHorizontal: 20,
+    backgroundColor: '#FFF7ED',
+    borderWidth: 1.5,
+    borderColor: '#FDBA74',
+    borderRadius: 16,
+    padding: 18,
+    alignItems: 'center',
+    textAlign: 'center',
+  },
+  noCampaignIconWrap: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#FFFFFF',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  noCampaignTitle: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: TEXT_MAIN,
+    marginBottom: 4,
+  },
+  noCampaignSub: {
+    fontSize: 12.5,
+    color: TEXT_DIM,
+    textAlign: 'center',
+    lineHeight: 18,
+    marginBottom: 14,
+    maxWidth: 280,
+  },
+  noCampaignBtn: {
+    backgroundColor: PRIMARY,
+    paddingHorizontal: 18,
+    paddingVertical: 11,
+    borderRadius: 10,
+  },
+  noCampaignBtnText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '900',
+    letterSpacing: 0.8,
+  },
 
   // ── Sponsor ──
   sponsorSection: {
@@ -581,4 +1042,139 @@ const styles = StyleSheet.create({
   resetBtnText:       { fontSize: 12, fontWeight: '700', color: '#166534' },
   errorBox:           { backgroundColor: '#FEE2E2', borderWidth: 1, borderColor: '#F87171', borderRadius: 8, padding: 10, marginBottom: 12 },
   errorText:          { color: '#DC2626', fontSize: 12, fontWeight: '600' },
+
+  // Owner Actions
+  ownerEditBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFF7ED',
+    borderWidth: 1.5,
+    borderColor: PRIMARY,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    alignSelf: 'flex-start',
+    marginTop: 6,
+    marginBottom: 6,
+  },
+  ownerEditBtnText: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: PRIMARY,
+  },
+  logoutWrapper: {
+    marginTop: 24,
+    marginBottom: 10,
+  },
+  ownerLogoutBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FEE2E2',
+    borderWidth: 1.5,
+    borderColor: '#FCA5A5',
+    borderRadius: 12,
+    paddingVertical: 12,
+  },
+  ownerLogoutText: {
+    color: '#DC2626',
+    fontSize: 12.5,
+    fontWeight: '900',
+    letterSpacing: 1,
+  },
+
+  // Edit Modal
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'flex-end',
+  },
+  modalContainer: {
+    backgroundColor: CARD_BG,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    maxHeight: '90%',
+    padding: 20,
+    paddingBottom: 36,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '900',
+    color: TEXT_MAIN,
+  },
+  modalSubtitle: {
+    fontSize: 12,
+    color: TEXT_DIM,
+  },
+  modalScroll: {
+    paddingBottom: 20,
+  },
+  modalField: {
+    marginBottom: 12,
+    gap: 4,
+  },
+  modalLabel: {
+    fontSize: 10.5,
+    fontWeight: '800',
+    letterSpacing: 1.2,
+    color: TEXT_DIM,
+  },
+  modalInput: {
+    backgroundColor: '#F9FAFB',
+    borderWidth: 1.5,
+    borderColor: BORDER,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    fontSize: 14,
+    color: TEXT_MAIN,
+    fontWeight: '500',
+  },
+  modalSaveBtn: {
+    backgroundColor: PRIMARY,
+    paddingVertical: 14,
+    borderRadius: 14,
+    alignItems: 'center',
+    marginTop: 10,
+    marginBottom: 20,
+  },
+  modalSaveBtnText: {
+    color: '#FFFFFF',
+    fontSize: 13.5,
+    fontWeight: '900',
+    letterSpacing: 1,
+  },
+  modalErrorBox: {
+    backgroundColor: '#FEF2F2',
+    borderWidth: 1,
+    borderColor: '#FCA5A5',
+    borderRadius: 10,
+    padding: 10,
+    marginBottom: 14,
+  },
+  modalErrorText: {
+    color: '#DC2626',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  modalSuccessBox: {
+    backgroundColor: '#ECFDF5',
+    borderWidth: 1,
+    borderColor: '#A7F3D0',
+    borderRadius: 10,
+    padding: 10,
+    marginBottom: 14,
+  },
+  modalSuccessText: {
+    color: '#059669',
+    fontSize: 12,
+    fontWeight: '700',
+  },
 });
+

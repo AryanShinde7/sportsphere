@@ -6,6 +6,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router, useFocusEffect } from 'expo-router';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { mobileApi, Storage } from '../utils/config';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -105,7 +106,8 @@ function AthleteCard({ item }: { item: any }) {
           </View>
           {isVerified && (
             <View style={styles.verifiedChip}>
-              <Text style={styles.verifiedChipText}>✓ VERIFIED</Text>
+              <Ionicons name="checkmark-circle" size={12} color="#059669" style={{ marginRight: 3 }} />
+              <Text style={styles.verifiedChipText}>VERIFIED</Text>
             </View>
           )}
         </View>
@@ -229,17 +231,7 @@ export default function DashboardScreen() {
   }, []);
 
   const handleProfilePress = () => {
-    if (currentUser?.role === 'ATHLETE' && currentUser?.athleteProfile?.id) {
-      router.push(`/athlete/${currentUser.athleteProfile.id}`);
-    } else {
-      alert(`User: ${currentUser?.name || 'Supporter'}\nRole: ${currentUser?.role || 'SUPPORTER'}`);
-    }
-  };
-
-  const handleLogout = async () => {
-    await Storage.removeItem('userToken');
-    await Storage.removeItem('userData');
-    router.replace('/');
+    router.push('/profile');
   };
 
   if (loading) {
@@ -256,7 +248,7 @@ export default function DashboardScreen() {
       {/* Search */}
       <View style={styles.searchWrap}>
         <View style={[styles.searchBarContainer, searchFocused && styles.searchFocused]}>
-          <Text style={styles.searchIcon}>🔍</Text>
+          <Ionicons name="search-outline" size={16} color={searchFocused ? PRIMARY : TEXT_FAINT} style={{ marginRight: 8 }} />
           <TextInput
             style={styles.searchInput}
             placeholder="Search athletes, sports, cities…"
@@ -315,8 +307,14 @@ export default function DashboardScreen() {
             </View>
             <Text style={styles.headerSub}>Verified Athlete Community</Text>
           </View>
-          <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout} activeOpacity={0.75}>
-            <Text style={styles.logoutText}>LOG OUT</Text>
+          <TouchableOpacity
+            style={styles.profileHeaderBtn}
+            onPress={() => router.push('/profile')}
+            activeOpacity={0.8}
+          >
+            <View style={styles.profileAvatarMini}>
+              <Text style={styles.profileAvatarMiniText}>{getInitials(currentUser?.name || 'User')}</Text>
+            </View>
           </TouchableOpacity>
         </View>
       </View>
@@ -350,19 +348,15 @@ export default function DashboardScreen() {
       <View style={[styles.bottomNav, { paddingBottom: Math.max(insets.bottom, 10) }]}>
         <View style={styles.navContainer}>
           <TouchableOpacity style={styles.navItem} onPress={() => {}} activeOpacity={0.7}>
-            <Text style={styles.navIcon}>⚡</Text>
+            <Ionicons name="flash" size={20} color={PRIMARY} />
             <Text style={[styles.navLabel, { color: PRIMARY, fontWeight: '800' }]}>Feed</Text>
           </TouchableOpacity>
           <TouchableOpacity style={styles.navItem} onPress={() => alert('Verification badge system is live!')} activeOpacity={0.7}>
-            <Text style={styles.navIcon}>🛡️</Text>
+            <Ionicons name="shield-checkmark-outline" size={20} color={TEXT_DIM} />
             <Text style={styles.navLabel}>Verify</Text>
           </TouchableOpacity>
           <TouchableOpacity style={styles.navItem} onPress={handleProfilePress} activeOpacity={0.7}>
-            {currentUser?.profileImageUrl ? (
-              <Image source={{ uri: currentUser.profileImageUrl }} style={styles.navAvatar} />
-            ) : (
-              <Text style={styles.navIcon}>👤</Text>
-            )}
+            <Ionicons name="person-circle-outline" size={22} color={TEXT_DIM} />
             <Text style={styles.navLabel}>Profile</Text>
           </TouchableOpacity>
         </View>
@@ -397,8 +391,29 @@ const styles = StyleSheet.create({
   logoW:     { fontSize: 20, fontWeight: '900', color: TEXT_MAIN, letterSpacing: -0.8, fontStyle: 'italic' },
   logoA:     { fontSize: 20, fontWeight: '900', color: PRIMARY,   letterSpacing: -0.8, fontStyle: 'italic' },
   headerSub: { fontSize: 9.5, fontWeight: '700', color: TEXT_FAINT, textTransform: 'uppercase', letterSpacing: 0.8, marginTop: 1 },
-  logoutBtn: { backgroundColor: '#F3F4F6', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8, borderWidth: 1, borderColor: BORDER },
-  logoutText:{ fontSize: 10, fontWeight: '800', color: TEXT_DIM, letterSpacing: 0.8 },
+  profileHeaderBtn: {
+    padding: 2,
+  },
+  profileAvatarMini: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: PRIMARY,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: '#FFFFFF',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  profileAvatarMiniText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '900',
+  },
 
   // Search + pills
   listHeaderWrapper:  { width: '100%', maxWidth: 500, alignSelf: 'center', paddingTop: 10, paddingBottom: 4 },

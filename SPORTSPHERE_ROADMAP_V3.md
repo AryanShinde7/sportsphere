@@ -15,6 +15,7 @@ This roadmap locks scope to three pillars only:
 
 | Pillar | What It Means |
 |:---|:---|
+| **Pillar A0 - Real Registration & Onboarding (TOP PRIORITY)** | Real person registration flow for Athletes (sport, discipline, location, profile) & Contributors (Supporters/Sponsors) + immediate role-aware login |
 | **Pillar A - Real Auth** | Production-grade email/password (bcrypt + JWT refresh tokens) + Firebase OTP phone login |
 | **Pillar B - Real Payments** | Live Razorpay integration: create order on backend -> native checkout on mobile -> HMAC webhook verification -> DB persist |
 | **Pillar C - Athlete Verification** | Athlete uploads Aadhaar + sports certificate -> admin reviews in portal -> status progresses -> badge shows on profile |
@@ -76,9 +77,11 @@ DEVICE SETUP (for native Expo build):
 ## 3. Phase Graph
 
 ```
-Phase A1: Production Auth Backend (JWT Refresh Tokens + Firebase Phone Verify)
+Phase A0: Real Athlete & Contributor Registration & Login Flow (TOP PRIORITY)
   |
-  +-- Phase A2: Mobile Auth Screens (Phone OTP + Email Login Unified Flow)
+  +-- Phase A1: Production Auth Backend (JWT Refresh Tokens + Firebase Phone Verify)
+  |     |
+  |     +-- Phase A2: Mobile Auth Screens (Phone OTP + Email Login Unified Flow)
   |
   +-- Phase C1: Athlete Verification Document Upload API (needs real auth)
         |
@@ -96,9 +99,8 @@ Phase B1: Razorpay Backend Order API + HMAC Verify (parallel with A1)
 ```
 
 **Parallelism allowed:**
-- A1 and B1 can run simultaneously (disjoint files)
-- B2 (build setup) can run simultaneously with A1 and B1
-- A2 and B3 can run simultaneously (disjoint files) after their respective backends are done
+- A0 runs immediately across backend and mobile registration components.
+- A1 and B1 can run after A0 foundation is in place.
 
 ---
 
@@ -111,6 +113,37 @@ Phase B1: Razorpay Backend Order API + HMAC Verify (parallel with A1)
 5. HMAC webhook signature MUST be verified before crediting any payment. No exceptions.
 6. No fake success states on payment or OTP — if it fails, show the error.
 7. Access tokens expire in 15 minutes. Every API call must handle 401 -> refresh -> retry.
+
+---
+
+# PHASE A0: Real Athlete & Contributor Registration & Login Flow (TOP PRIORITY)
+
+## Goal
+Enable real individuals to register directly on SportSphere either as:
+1. **Athlete**: Complete profile creation (Full Name, Email, Password, Phone, Sport selection, Discipline, City, State, Headline, Bio, Career Goal) linking their `User` account with a real `AthleteProfile`.
+2. **Contributor (Supporter/Sponsor)**: Streamlined registration for donors, backers, and corporate sponsors.
+3. **Immediate Seamless Login**: Upon registration or login, return complete user metadata (including `athleteProfile` and `sponsorProfile`), auto-authenticate, and navigate athletes to their dedicated dashboard/profile and contributors to the discovery feed.
+
+## Scope
+```
+backend/src/index.ts          (Enhanced /api/auth/register, /api/auth/login, /api/sports)
+mobile-app/src/app/index.tsx  (Role-aware multi-step registration UI + login)
+mobile-app/src/utils/config.ts
+SPORTSPHERE_ROADMAP_V3.md
+```
+
+## Deliverables
+- [ ] `GET /api/sports`: Returns active sports list for registration dropdowns.
+- [ ] `POST /api/auth/register`:
+  - Handles `role: 'ATHLETE'` with transactional creation of `User` + `AthleteProfile` + default unverified `Verification` records.
+  - Handles `role: 'SUPPORTER'` and `role: 'SPONSOR'` with transactional creation of `User` + `SponsorProfile`.
+  - Returns auth `token` and hydrated `user` object directly on registration for instant login.
+- [ ] `POST /api/auth/login`: Hydrates `athleteProfile` (with linked sport) and `sponsorProfile` into user session payload.
+- [ ] Mobile App (`index.tsx`):
+  - Role switcher tab during registration: **I AM AN ATHLETE** vs **I AM A CONTRIBUTOR / SUPPORTER**.
+  - Dynamic sport selection dropdown.
+  - Fields for discipline, state, city, headline, and bio for athletes.
+  - Clean error handling, validation, loading states, and direct login redirect.
 
 ---
 
