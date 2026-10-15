@@ -340,4 +340,48 @@ export const mobileApi = {
       return res.data;
     },
   },
+
+  posts: {
+    getAll: async (params?: { athleteId?: number; page?: number; limit?: number }) => {
+      const res = await apiClient.get('/posts', { params });
+      return res.data;
+    },
+    getAthletePosts: async (athleteId: number) => {
+      const res = await apiClient.get(`/athletes/${athleteId}/posts`);
+      return res.data;
+    },
+    create: async (data: { content: string; mediaUrl?: string }) => {
+      const res = await apiClient.post('/posts', data);
+      return res.data;
+    },
+    toggleCheer: async (postId: number) => {
+      const res = await apiClient.post(`/posts/${postId}/cheer`);
+      return res.data;
+    },
+    delete: async (postId: number) => {
+      const res = await apiClient.delete(`/posts/${postId}`);
+      return res.data;
+    },
+    uploadMedia: async (imageUri: string, mimeType?: string, fileName?: string) => {
+      const formData = new FormData();
+      const ext = (imageUri.split('.').pop() || 'jpg').split('?')[0].toLowerCase();
+      const finalName = fileName || `post_${Date.now()}.${ext}`;
+      const type = mimeType || `image/${ext === 'png' ? 'png' : 'jpeg'}`;
+
+      formData.append('file', {
+        uri: imageUri,
+        name: finalName,
+        type,
+      } as any);
+
+      const token = await getAuthToken();
+      const res = await axios.post(`${API_URL}/upload`, formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+      });
+      return res.data;
+    },
+  },
 };

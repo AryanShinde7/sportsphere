@@ -1,7 +1,6 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
@@ -10,12 +9,27 @@ import path from 'path';
 import fs from 'fs';
 import { v4 as uuidv4 } from 'uuid';
 
+import prisma from './prisma';
+import {
+  authenticateToken,
+  optionalAuthenticateToken,
+  requireAdmin,
+  requireRole,
+  JWT_SECRET,
+  AuthenticatedRequest
+} from './middleware/auth';
+import { authRateLimiter, sensitiveEndpointLimiter } from './middleware/rateLimiter';
+import {
+  validateEvidenceFileBuffer,
+  savePrivateEvidenceFile,
+  getPrivateFilePath,
+  PRIVATE_UPLOADS_DIR
+} from './utils/fileValidation';
+
 dotenv.config();
 
 const app = express();
-const prisma = new PrismaClient(process.env.DATABASE_URL ? { datasourceUrl: process.env.DATABASE_URL } : undefined);
 const PORT = parseInt(process.env.PORT || '5000', 10);
-const JWT_SECRET = process.env.JWT_SECRET || 'supersecretkey_for_demo_only';
 const MOCK_WEBHOOK_SECRET = process.env.MOCK_WEBHOOK_SECRET || 'sportsphere_mock_webhook_secret_2026';
 
 const Razorpay = require('razorpay');
@@ -39,14 +53,20 @@ function getRazorpayConfig() {
 }
 
 app.use(cors());
-app.use(express.json());
 
-// --- Static file serving for uploaded athlete media ---
+// Instruction 3.4: Configure the webhook route to capture raw request body before JSON parsing
+app.use(express.json({
+  verify: (req: any, _res, buf) => {
+    req.rawBody = buf;
+  }
+}));
+
+// Instruction 1.1 & 1.7: Public athlete media (profile pictures, banners) served statically under /uploads
 const UPLOADS_DIR = path.join(__dirname, '..', 'uploads');
 if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 app.use('/uploads', express.static(UPLOADS_DIR));
 
-// --- Multer config: disk storage, UUID filenames, image-only validation ---
+// Public media upload (avatars & banners)
 const storage = multer.diskStorage({
   destination: (_req, _file, cb) => cb(null, UPLOADS_DIR),
   filename: (_req, file, cb) => {
@@ -68,34 +88,67 @@ const upload = multer({
   },
 });
 
-// --- Authentication Middleware ---
-const authenticateToken = (req: any, res: any, next: any) => {
-  const authHeader = req.headers['authorization'];
-  const token = authHeader && authHeader.split(' ')[1];
-
-  if (!token) return res.status(401).json({ error: 'Access denied' });
-
-  jwt.verify(token, JWT_SECRET, (err: any, user: any) => {
-    if (err) return res.status(403).json({ error: 'Invalid token' });
-    req.user = user;
-    next();
-  });
-};
-
-// --- Admin role guard (use after authenticateToken) ---
-const requireAdmin = (req: any, res: any, next: any) => {
-  if (req.user.role !== 'ADMIN') return res.status(403).json({ error: 'Admin access required' });
-  next();
-};
+// Instruction 1.3: Dedicated upload multer for verification documents using memoryStorage to inspect buffer magic bytes
+const evidenceUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB max
+});
 
 // --- Helper: Write audit log ---
 async function writeAuditLog(userId: number, action: string, entityType: string, entityId: number, details?: string) {
   await prisma.auditLog.create({
-    data: { userId, action, entityType, entityId, details }
+    data: { userId, action, entityType, entityId, details: details || null }
   });
 }
 
-// --- Helper: Hydrate a Verification record with its linked entity ---
+// Instruction 4.6: Validate that entity belongs to authenticated user
+async function checkEntityOwnership(entityType: string, entityId: number, userId: number): Promise<boolean> {
+  if (entityType === 'AthleteProfile') {
+    const profile = await prisma.athleteProfile.findUnique({ where: { id: entityId } });
+    return profile?.userId === userId;
+  }
+  if (entityType === 'Achievement') {
+    const ach = await prisma.achievement.findUnique({
+      where: { id: entityId },
+      include: { athlete: true }
+    });
+    return ach?.athlete?.userId === userId;
+  }
+  if (entityType === 'SupportRequest') {
+    const sr = await prisma.supportRequest.findUnique({
+      where: { id: entityId },
+      include: { athlete: true }
+    });
+    return sr?.athlete?.userId === userId;
+  }
+  if (entityType === 'BudgetItem') {
+    const bi = await prisma.budgetItem.findUnique({
+      where: { id: entityId },
+      include: { supportRequest: { include: { athlete: true } } }
+    });
+    return bi?.supportRequest?.athlete?.userId === userId;
+  }
+  return false;
+}
+
+// Instruction 1.6 & 4.4: Check verification claim ownership
+async function checkVerificationOwnership(verification: any, userId: number): Promise<boolean> {
+  return checkEntityOwnership(verification.entityType, verification.entityId, userId);
+}
+
+// Instruction 7.8: Avoid returning internal reviewer notes or private evidence details in public API responses
+function sanitizeVerificationForPublic(v: any) {
+  return {
+    id: v.id,
+    entityType: v.entityType,
+    entityId: v.entityId,
+    category: v.category,
+    status: v.status,
+    verifiedAt: v.verifiedAt,
+  };
+}
+
+// --- Helper: Hydrate a Verification record with its linked entity and evidence ---
 async function hydrateVerification(v: any) {
   let entity: any = null;
   let athleteName: string | null = null;
@@ -126,7 +179,11 @@ async function hydrateVerification(v: any) {
     athleteName = entity?.supportRequest?.athlete?.user?.name || null;
   }
 
-  return { ...v, entity, athleteName };
+  const evidence = await prisma.verificationEvidence.findMany({
+    where: { verificationId: v.id }
+  });
+
+  return { ...v, entity, athleteName, evidence };
 }
 
 // --- Helper: Generate mock Razorpay-style IDs ---
@@ -330,7 +387,8 @@ app.post('/api/auth/register', async (req, res) => {
   }
 });
 
-app.post('/api/auth/login', async (req, res) => {
+// Instruction 7.5: Add rate limiting to login and sensitive endpoints
+app.post('/api/auth/login', authRateLimiter, async (req, res) => {
   const { email, password } = req.body;
   if (!email || !password) {
     return res.status(400).json({ error: 'Email and password are required' });
@@ -352,6 +410,11 @@ app.post('/api/auth/login', async (req, res) => {
     });
 
     if (!user) return res.status(404).json({ error: 'User not found' });
+
+    // Instruction 7.4: Validate current account status
+    if (user.status !== 'ACTIVE') {
+      return res.status(403).json({ error: `Account is ${user.status.toLowerCase()}. Access denied.` });
+    }
 
     const validPassword = await bcrypt.compare(password, user.passwordHash);
     if (!validPassword) return res.status(401).json({ error: 'Invalid credentials' });
@@ -739,7 +802,7 @@ app.get('/api/users/contributions', authenticateToken, async (req: any, res) => 
 // ATHLETE & DISCOVERY ROUTES (with filters — Step 5)
 // ===================================================================
 
-app.get('/api/athletes', async (req, res) => {
+app.get('/api/athletes', optionalAuthenticateToken, async (req: any, res) => {
   try {
     const { sport, discipline, state, achievementLevel, supportCategory, verificationStatus, requestStatus } = req.query;
 
@@ -770,12 +833,13 @@ app.get('/api/athletes', async (req, res) => {
     const athletes = await prisma.athleteProfile.findMany({
       where,
       include: {
-        user: { select: { name: true } },
+        user: { select: { id: true, name: true, profileImageUrl: true, bannerImageUrl: true } },
         sport: true,
         achievements: true,
         mediaAssets: { orderBy: { order: 'asc' } },
         supportRequests: {
-          where: { lifecycleStatus: 'ACTIVE' },
+          // Instruction 2.6: Ensure public discovery endpoints do not expose unapproved campaigns
+          where: { lifecycleStatus: 'ACTIVE', approvalStatus: 'APPROVED' },
           orderBy: { createdAt: 'desc' },
           include: {
             budgetItems: true,
@@ -788,26 +852,31 @@ app.get('/api/athletes', async (req, res) => {
       }
     });
 
+    const isViewerAdmin = req.user?.role === 'ADMIN';
+
     // Attach verification records for each athlete
     const athletesWithVerifications = await Promise.all(athletes.map(async (athlete) => {
-      // Get verifications for this athlete profile (IDENTITY, ATHLETE_AFFILIATION)
       const profileVerifications = await prisma.verification.findMany({
         where: { entityType: 'AthleteProfile', entityId: athlete.id }
       });
 
-      // Get verifications for each achievement
       const achievementIds = athlete.achievements.map((a: any) => a.id);
       const achievementVerifications = achievementIds.length > 0 ? await prisma.verification.findMany({
         where: { entityType: 'Achievement', entityId: { in: achievementIds } }
       }) : [];
 
-      // Get verifications for each support request
       const srIds = athlete.supportRequests.map((sr: any) => sr.id);
       const supportVerifications = srIds.length > 0 ? await prisma.verification.findMany({
         where: { entityType: 'SupportRequest', entityId: { in: srIds } }
       }) : [];
 
-      const verifications = [...profileVerifications, ...achievementVerifications, ...supportVerifications];
+      const rawVerifications = [...profileVerifications, ...achievementVerifications, ...supportVerifications];
+
+      // Instruction 7.8: Sanitize verification details for public / non-admin viewers
+      const isOwner = req.user && req.user.id === athlete.user.id;
+      const verifications = (isViewerAdmin || isOwner)
+        ? rawVerifications
+        : rawVerifications.map(sanitizeVerificationForPublic);
 
       return { ...athlete, verifications };
     }));
@@ -837,12 +906,12 @@ app.get('/api/athletes', async (req, res) => {
   }
 });
 
-app.get('/api/athletes/:id', async (req, res) => {
+app.get('/api/athletes/:id', optionalAuthenticateToken, async (req: any, res) => {
   try {
     const athlete = await prisma.athleteProfile.findUnique({
       where: { id: parseInt(req.params.id) },
       include: {
-        user: { select: { name: true } },
+        user: { select: { id: true, name: true, profileImageUrl: true, bannerImageUrl: true } },
         sport: true,
         achievements: true,
         mediaAssets: { orderBy: { order: 'asc' } },
@@ -860,6 +929,15 @@ app.get('/api/athletes/:id', async (req, res) => {
     });
     if (!athlete) return res.status(404).json({ error: 'Athlete not found' });
 
+    const isOwner = req.user && req.user.id === athlete.user.id;
+    const isAdmin = req.user?.role === 'ADMIN';
+    const isPrivileged = Boolean(isOwner || isAdmin);
+
+    // Instruction 2.6: Filter unapproved campaigns unless owner athlete or admin
+    const filteredSupportRequests = isPrivileged
+      ? athlete.supportRequests
+      : athlete.supportRequests.filter((sr: any) => sr.approvalStatus === 'APPROVED' && sr.lifecycleStatus === 'ACTIVE');
+
     // Attach verification records
     const profileVerifications = await prisma.verification.findMany({
       where: { entityType: 'AthleteProfile', entityId: athlete.id }
@@ -868,14 +946,23 @@ app.get('/api/athletes/:id', async (req, res) => {
     const achievementVerifications = achievementIds.length > 0 ? await prisma.verification.findMany({
       where: { entityType: 'Achievement', entityId: { in: achievementIds } }
     }) : [];
-    const srIds = athlete.supportRequests.map((sr: any) => sr.id);
+    const srIds = filteredSupportRequests.map((sr: any) => sr.id);
     const supportVerifications = srIds.length > 0 ? await prisma.verification.findMany({
       where: { entityType: 'SupportRequest', entityId: { in: srIds } }
     }) : [];
 
-    const verifications = [...profileVerifications, ...achievementVerifications, ...supportVerifications];
+    const rawVerifications = [...profileVerifications, ...achievementVerifications, ...supportVerifications];
 
-    res.json({ ...athlete, verifications });
+    // Instruction 7.8: Avoid returning internal reviewer notes or private evidence details in public API responses
+    const verifications = isPrivileged
+      ? rawVerifications
+      : rawVerifications.map(sanitizeVerificationForPublic);
+
+    res.json({
+      ...athlete,
+      supportRequests: filteredSupportRequests,
+      verifications
+    });
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch athlete' });
   }
@@ -885,14 +972,29 @@ app.get('/api/athletes/:id', async (req, res) => {
 // SUPPORT REQUEST ROUTES
 // ===================================================================
 
+// Instruction 2.6: Ensure public discovery endpoints do not expose unapproved campaigns
 app.get('/api/support-requests', async (req, res) => {
   try {
     const requests = await prisma.supportRequest.findMany({
+      where: {
+        lifecycleStatus: 'ACTIVE',
+        approvalStatus: 'APPROVED'
+      },
+      orderBy: { createdAt: 'desc' },
       include: {
         athlete: {
-          include: { user: { select: { name: true, email: true } }, sport: true }
+          include: {
+            user: { select: { id: true, name: true, email: true, profileImageUrl: true, bannerImageUrl: true } },
+            sport: true,
+            mediaAssets: true,
+          }
         },
-        budgetItems: true
+        budgetItems: true,
+        supports: {
+          include: {
+            supporter: { select: { id: true, name: true, profileImageUrl: true } }
+          }
+        }
       }
     });
     res.json(requests);
@@ -901,18 +1003,28 @@ app.get('/api/support-requests', async (req, res) => {
   }
 });
 
-app.get('/api/support-requests/:id', async (req, res) => {
+app.get('/api/support-requests/:id', optionalAuthenticateToken, async (req: any, res) => {
   try {
     const request = await prisma.supportRequest.findUnique({
       where: { id: parseInt(req.params.id) },
       include: {
         athlete: {
-          include: { user: { select: { name: true } }, sport: true, achievements: true }
+          include: { user: { select: { id: true, name: true } }, sport: true, achievements: true }
         },
         budgetItems: true
       }
     });
     if (!request) return res.status(404).json({ error: 'Support request not found' });
+
+    // Instruction 2.6: Unapproved campaign is not publicly discoverable
+    if (request.approvalStatus !== 'APPROVED') {
+      const isOwner = req.user && req.user.id === request.athlete?.user?.id;
+      const isAdmin = req.user?.role === 'ADMIN';
+      if (!isOwner && !isAdmin) {
+        return res.status(404).json({ error: 'Support request is under review and not yet publicly available' });
+      }
+    }
+
     res.json(request);
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch support request' });
@@ -920,7 +1032,9 @@ app.get('/api/support-requests/:id', async (req, res) => {
 });
 
 // POST /api/support-requests — Athlete creates a new funding campaign
-app.post('/api/support-requests', authenticateToken, async (req: any, res) => {
+// Instruction 2.1 & 2.2: Set newly submitted support requests to SUBMITTED, not APPROVED.
+// Create corresponding Verification record with category: 'SUPPORT_NEED' and status: 'PENDING_REVIEW'.
+app.post('/api/support-requests', authenticateToken, sensitiveEndpointLimiter, async (req: any, res) => {
   const {
     title,
     description,
@@ -968,7 +1082,7 @@ app.post('/api/support-requests', authenticateToken, async (req: any, res) => {
           category: validCategory.toUpperCase(),
           targetAmount: numTarget,
           deadline: deadline ? new Date(deadline) : null,
-          approvalStatus: 'APPROVED',
+          approvalStatus: 'SUBMITTED', // Instruction 2.1: SUBMITTED, not APPROVED
           lifecycleStatus: 'ACTIVE',
           amountSupported: 0,
         }
@@ -990,15 +1104,25 @@ app.post('/api/support-requests', authenticateToken, async (req: any, res) => {
         }
       }
 
-      await tx.verification.create({
+      const ver = await tx.verification.create({
         data: {
           entityType: 'SupportRequest',
           entityId: sr.id,
           category: 'SUPPORT_NEED',
-          status: 'PENDING_REVIEW',
+          status: 'PENDING_REVIEW', // Instruction 2.2: PENDING_REVIEW
           notes: evidenceUrl ? `Supporting proof: ${evidenceUrl}` : (description ? `Reason: ${title}` : null),
         }
       });
+
+      if (evidenceUrl) {
+        await tx.verificationEvidence.create({
+          data: {
+            verificationId: ver.id,
+            evidenceType: 'URL',
+            sourceUrl: evidenceUrl,
+          }
+        });
+      }
 
       return sr;
     });
@@ -1029,7 +1153,7 @@ app.post('/api/support-requests', authenticateToken, async (req: any, res) => {
 // ===================================================================
 
 // POST /api/payments/razorpay/create-order — creates Support + Transaction, returns Razorpay order
-app.post('/api/payments/razorpay/create-order', authenticateToken, async (req: any, res) => {
+app.post('/api/payments/razorpay/create-order', authenticateToken, sensitiveEndpointLimiter, async (req: any, res) => {
   const { supportRequestId, amount } = req.body;
   const supporterId = req.user.id;
 
@@ -1046,6 +1170,11 @@ app.post('/api/payments/razorpay/create-order', authenticateToken, async (req: a
       include: { athlete: { include: { user: { select: { name: true } } } } }
     });
     if (!supportRequest) return res.status(404).json({ error: 'Support request not found' });
+
+    // Instruction 2.3: Prevent pending or rejected campaigns from accepting real contributions
+    if (supportRequest.approvalStatus !== 'APPROVED') {
+      return res.status(400).json({ error: 'This campaign is pending verification and cannot accept contributions yet.' });
+    }
 
     let orderId: string;
     const orderReceipt = `sp_${Date.now()}`;
@@ -1119,11 +1248,26 @@ app.post('/api/payments/razorpay/create-order', authenticateToken, async (req: a
 });
 
 // POST /api/payments/razorpay/verify — verify Razorpay signature and capture payment
-app.post('/api/payments/razorpay/verify', authenticateToken, async (req: any, res) => {
+// Instruction 3: Make payment verification fail closed
+app.post('/api/payments/razorpay/verify', authenticateToken, sensitiveEndpointLimiter, async (req: any, res) => {
   const { razorpay_order_id, razorpay_payment_id, razorpay_signature, supportId } = req.body;
 
   if (!razorpay_order_id || !razorpay_payment_id) {
     return res.status(400).json({ error: 'razorpay_order_id and razorpay_payment_id are required' });
+  }
+
+  const isProd = process.env.NODE_ENV === 'production';
+  const { keyId, keySecret, client } = getRazorpayConfig();
+
+  // Instruction 3.1: In production, reject payment-verification requests if valid Razorpay credentials are not configured
+  if (isProd) {
+    if (!keyId || !keySecret || keyId.includes('YOUR_KEY_ID') || keySecret.includes('YOUR_KEY_SECRET')) {
+      return res.status(503).json({ error: 'Razorpay credentials not properly configured in production environment.' });
+    }
+    // Instruction 3.5: Reject missing or invalid signatures. Never accept a placeholder signature in production.
+    if (!razorpay_signature || razorpay_signature === 'sandbox_verified_signature') {
+      return res.status(400).json({ error: 'Valid payment signature is required.' });
+    }
   }
 
   try {
@@ -1136,6 +1280,7 @@ app.post('/api/payments/razorpay/verify', authenticateToken, async (req: any, re
       return res.status(404).json({ error: 'Transaction not found for this order ID' });
     }
 
+    // Instruction 3.7: Process idempotently so duplicate events cannot increment amountSupported more than once
     if (transaction.status === 'CAPTURED') {
       return res.status(200).json({
         message: 'Payment already verified (idempotent)',
@@ -1144,42 +1289,77 @@ app.post('/api/payments/razorpay/verify', authenticateToken, async (req: any, re
       });
     }
 
-    // Verify HMAC SHA256 signature when secret is provided
-    const { keySecret } = getRazorpayConfig();
-    if (keySecret && !keySecret.includes('YOUR_KEY_SECRET') && razorpay_signature && razorpay_signature !== 'sandbox_verified_signature') {
-      const generatedSignature = crypto
-        .createHmac('sha256', keySecret)
-        .update(`${razorpay_order_id}|${razorpay_payment_id}`)
-        .digest('hex');
-
-      if (generatedSignature !== razorpay_signature) {
-        console.warn('Razorpay signature mismatch:', { generatedSignature, received: razorpay_signature });
-        return res.status(400).json({ error: 'Invalid payment signature. Verification failed.' });
-      }
+    // Instruction 3.6: Verify transaction's stored order, amount, currency, and payment status before marking it successful
+    if (transaction.status === 'FAILED') {
+      return res.status(400).json({ error: 'Transaction is marked as failed and cannot be verified.' });
+    }
+    if (transaction.amount <= 0 || transaction.currency !== 'INR') {
+      return res.status(400).json({ error: 'Invalid transaction amount or currency.' });
     }
 
-    // Update Transaction → CAPTURED
-    await prisma.transaction.update({
-      where: { id: transaction.id },
-      data: {
-        status: 'CAPTURED',
-        gatewayPaymentId: razorpay_payment_id,
-        gatewaySignature: razorpay_signature || 'verified_signature',
-        gatewayResponse: JSON.stringify(req.body),
+    // Instruction 3.2: Always validate payment signature using expected order ID, payment ID, and secret. Use constant-time comparison.
+    if (keySecret && !keySecret.includes('YOUR_KEY_SECRET') && razorpay_signature) {
+      if (!isProd && razorpay_signature === 'sandbox_verified_signature' && !client) {
+        // Confined to explicit development/test environment without real client
+      } else {
+        const expectedSignature = crypto
+          .createHmac('sha256', keySecret)
+          .update(`${razorpay_order_id}|${razorpay_payment_id}`)
+          .digest('hex');
+
+        const sigBuf = Buffer.from(razorpay_signature, 'utf8');
+        const genBuf = Buffer.from(expectedSignature, 'utf8');
+
+        if (sigBuf.length !== genBuf.length || !crypto.timingSafeEqual(sigBuf, genBuf)) {
+          console.warn('Razorpay signature mismatch:', { received: razorpay_signature });
+          return res.status(400).json({ error: 'Invalid payment signature. Verification failed.' });
+        }
       }
+    } else if (isProd) {
+      return res.status(400).json({ error: 'Payment signature verification failed. Missing secret or signature.' });
+    }
+
+    // Instruction 3.7: Process in a Prisma transaction to guarantee atomic and idempotent status update
+    const result = await prisma.$transaction(async (tx) => {
+      const freshTx = await tx.transaction.findUnique({
+        where: { id: transaction.id },
+        include: { support: true }
+      });
+
+      if (!freshTx || freshTx.status === 'CAPTURED') {
+        return { alreadyCaptured: true };
+      }
+
+      await tx.transaction.update({
+        where: { id: transaction.id },
+        data: {
+          status: 'CAPTURED',
+          gatewayPaymentId: razorpay_payment_id,
+          gatewaySignature: razorpay_signature || 'verified_signature',
+          gatewayResponse: JSON.stringify(req.body),
+        }
+      });
+
+      await tx.support.update({
+        where: { id: transaction.supportId },
+        data: { status: 'SUCCESS' }
+      });
+
+      const updatedRequest = await tx.supportRequest.update({
+        where: { id: transaction.support.supportRequestId },
+        data: { amountSupported: { increment: transaction.amount } }
+      });
+
+      return { alreadyCaptured: false, updatedRequest };
     });
 
-    // Update Support → SUCCESS
-    await prisma.support.update({
-      where: { id: transaction.supportId },
-      data: { status: 'SUCCESS' }
-    });
-
-    // Atomically increment SupportRequest.amountSupported
-    const updatedRequest = await prisma.supportRequest.update({
-      where: { id: transaction.support.supportRequestId },
-      data: { amountSupported: { increment: transaction.amount } }
-    });
+    if (result.alreadyCaptured) {
+      return res.status(200).json({
+        message: 'Payment already verified (idempotent)',
+        status: 'CAPTURED',
+        supportId: transaction.supportId
+      });
+    }
 
     await writeAuditLog(req.user.id, 'PAYMENT_VERIFIED', 'Support', transaction.supportId,
       JSON.stringify({ orderId: razorpay_order_id, paymentId: razorpay_payment_id, amount: transaction.amount }));
@@ -1189,8 +1369,8 @@ app.post('/api/payments/razorpay/verify', authenticateToken, async (req: any, re
       message: 'Payment verified and captured successfully',
       status: 'CAPTURED',
       amount: transaction.amount,
-      amountSupported: updatedRequest.amountSupported,
-      targetAmount: updatedRequest.targetAmount,
+      amountSupported: result.updatedRequest!.amountSupported,
+      targetAmount: result.updatedRequest!.targetAmount,
     });
   } catch (error: any) {
     console.error('Payment verification error:', error);
@@ -1281,9 +1461,42 @@ app.get('/api/payments/razorpay/checkout-page', (req: any, res) => {
 });
 
 // POST /api/payments/razorpay/webhook — processes payment confirmation from Razorpay webhook
+// Instruction 3.3 & 3.4: Validate actual Razorpay webhooks against X-Razorpay-Signature using webhook secret and exact raw request body
 app.post('/api/payments/razorpay/webhook', async (req, res) => {
-  const webhookSecret = req.headers['x-mock-webhook-secret'] || process.env.RAZORPAY_WEBHOOK_SECRET;
-  const { razorpay_order_id, razorpay_payment_id, razorpay_signature, status } = req.body;
+  const isProd = process.env.NODE_ENV === 'production';
+  const webhookSignature = (req.headers['x-razorpay-signature'] || '') as string;
+  const webhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET || (!isProd ? (req.headers['x-mock-webhook-secret'] as string || process.env.MOCK_WEBHOOK_SECRET) : '');
+
+  if (isProd) {
+    if (!webhookSecret) {
+      return res.status(500).json({ error: 'RAZORPAY_WEBHOOK_SECRET is not configured in production' });
+    }
+    // Instruction 3.5: Reject missing or invalid signatures
+    if (!webhookSignature) {
+      return res.status(400).json({ error: 'Missing X-Razorpay-Signature header' });
+    }
+  }
+
+  // Validate webhook signature against raw request body
+  if (webhookSecret && webhookSignature) {
+    const rawBody = (req as any).rawBody || Buffer.from(JSON.stringify(req.body));
+    const generated = crypto.createHmac('sha256', webhookSecret).update(rawBody).digest('hex');
+    const sigBuf = Buffer.from(webhookSignature, 'utf8');
+    const genBuf = Buffer.from(generated, 'utf8');
+
+    if (sigBuf.length !== genBuf.length || !crypto.timingSafeEqual(sigBuf, genBuf)) {
+      console.warn('Webhook signature verification failed');
+      return res.status(400).json({ error: 'Invalid webhook signature.' });
+    }
+  } else if (isProd) {
+    return res.status(400).json({ error: 'Webhook signature validation required in production' });
+  }
+
+  const paymentEntity = req.body.payload?.payment?.entity;
+  const razorpay_order_id = req.body.razorpay_order_id || paymentEntity?.order_id;
+  const razorpay_payment_id = req.body.razorpay_payment_id || paymentEntity?.id;
+  const razorpay_signature = req.body.razorpay_signature;
+  const status = req.body.status || paymentEntity?.status;
 
   if (!razorpay_order_id) {
     return res.status(400).json({ error: 'razorpay_order_id is required' });
@@ -1299,6 +1512,7 @@ app.post('/api/payments/razorpay/webhook', async (req, res) => {
       return res.status(404).json({ error: 'Transaction not found for this order ID' });
     }
 
+    // Instruction 3.7: Process idempotently so duplicate events cannot increment amountSupported more than once
     if (transaction.status === 'CAPTURED') {
       return res.status(200).json({ message: 'Payment already processed (idempotent)', status: 'CAPTURED' });
     }
@@ -1306,27 +1520,32 @@ app.post('/api/payments/razorpay/webhook', async (req, res) => {
       return res.status(200).json({ message: 'Payment already failed (idempotent)', status: 'FAILED' });
     }
 
-    const isSuccess = status !== 'failed';
+    const isSuccess = req.body.event ? (req.body.event !== 'payment.failed' && status !== 'failed') : (status !== 'failed');
 
     if (isSuccess) {
-      await prisma.transaction.update({
-        where: { id: transaction.id },
-        data: {
-          status: 'CAPTURED',
-          gatewayPaymentId: razorpay_payment_id || generateMockId('pay'),
-          gatewaySignature: razorpay_signature || 'webhook_signature',
-          gatewayResponse: JSON.stringify(req.body),
-        }
-      });
+      await prisma.$transaction(async (tx) => {
+        const freshTx = await tx.transaction.findUnique({ where: { id: transaction.id } });
+        if (freshTx?.status === 'CAPTURED') return;
 
-      await prisma.support.update({
-        where: { id: transaction.supportId },
-        data: { status: 'SUCCESS' }
-      });
+        await tx.transaction.update({
+          where: { id: transaction.id },
+          data: {
+            status: 'CAPTURED',
+            gatewayPaymentId: razorpay_payment_id || generateMockId('pay'),
+            gatewaySignature: razorpay_signature || 'webhook_signature',
+            gatewayResponse: JSON.stringify(req.body),
+          }
+        });
 
-      await prisma.supportRequest.update({
-        where: { id: transaction.support.supportRequestId },
-        data: { amountSupported: { increment: transaction.amount } }
+        await tx.support.update({
+          where: { id: transaction.supportId },
+          data: { status: 'SUCCESS' }
+        });
+
+        await tx.supportRequest.update({
+          where: { id: transaction.support.supportRequestId },
+          data: { amountSupported: { increment: transaction.amount } }
+        });
       });
 
       res.json({ message: 'Payment captured successfully via webhook', status: 'CAPTURED' });
@@ -1353,7 +1572,7 @@ app.post('/api/payments/razorpay/webhook', async (req, res) => {
 });
 
 // Legacy support route (kept for backward compat, but now creates proper Transaction records)
-app.post('/api/support-requests/:id/support', authenticateToken, async (req: any, res) => {
+app.post('/api/support-requests/:id/support', authenticateToken, sensitiveEndpointLimiter, async (req: any, res) => {
   const { amount } = req.body;
   const supportRequestId = parseInt(req.params.id);
   const supporterId = req.user.id;
@@ -1361,6 +1580,11 @@ app.post('/api/support-requests/:id/support', authenticateToken, async (req: any
   try {
     const supportRequest = await prisma.supportRequest.findUnique({ where: { id: supportRequestId } });
     if (!supportRequest) return res.status(404).json({ error: 'Support request not found' });
+
+    // Instruction 2.3: Prevent pending or rejected campaigns from accepting real contributions
+    if (supportRequest.approvalStatus !== 'APPROVED') {
+      return res.status(400).json({ error: 'This campaign is pending verification and cannot accept contributions yet.' });
+    }
 
     const mockOrderId = generateMockId('order');
     const mockPaymentId = generateMockId('pay');
@@ -1397,19 +1621,469 @@ app.post('/api/support-requests/:id/support', authenticateToken, async (req: any
 });
 
 // ===================================================================
-// ADMIN — VERIFICATION ROUTES (Step 3)
+// USER VERIFICATION SUBMISSION & EVIDENCE ROUTES (Instructions 1, 4, 5)
+// ===================================================================
+
+// POST /api/verifications — Authenticated user submits a verification claim
+// Instruction 4.3, 4.6, 4.7
+app.post('/api/verifications', authenticateToken, sensitiveEndpointLimiter, async (req: any, res) => {
+  const { entityType, entityId, category, notes, evidenceType, sourceUrl } = req.body;
+
+  if (!entityType || !entityId || !category) {
+    return res.status(400).json({ error: 'entityType, entityId, and category are required' });
+  }
+
+  const validEntityTypes = ['AthleteProfile', 'Achievement', 'SupportRequest', 'BudgetItem'];
+  if (!validEntityTypes.includes(entityType)) {
+    return res.status(400).json({ error: `Invalid entityType. Must be one of: ${validEntityTypes.join(', ')}` });
+  }
+
+  const numEntityId = parseInt(entityId, 10);
+  if (isNaN(numEntityId)) {
+    return res.status(400).json({ error: 'entityId must be a valid number' });
+  }
+
+  try {
+    // Instruction 4.6: Validate that entity belongs to authenticated user
+    const isOwner = await checkEntityOwnership(entityType, numEntityId, req.user.id);
+    if (!isOwner && req.user.role !== 'ADMIN') {
+      return res.status(403).json({ error: 'You do not have permission to submit or modify verification for this entity.' });
+    }
+
+    // Instruction 4.7: Prevent users from assigning themselves VERIFIED status or setting verifiedBy
+    const status = 'PENDING_REVIEW';
+
+    let verificationRecord = await prisma.verification.findFirst({
+      where: {
+        entityType,
+        entityId: numEntityId,
+        category,
+      }
+    });
+
+    if (verificationRecord) {
+      // Instruction 6.1: Allow submission to move claim from NOT_SUBMITTED to PENDING_REVIEW (or resubmission from NEEDS_CORRECTION / REJECTED)
+      verificationRecord = await prisma.verification.update({
+        where: { id: verificationRecord.id },
+        data: {
+          status,
+          notes: notes !== undefined ? notes : verificationRecord.notes,
+          verifiedBy: null,
+          verifiedAt: null,
+        }
+      });
+    } else {
+      verificationRecord = await prisma.verification.create({
+        data: {
+          entityType,
+          entityId: numEntityId,
+          category,
+          status,
+          notes: notes || null,
+        }
+      });
+    }
+
+    let evidenceRecord = null;
+    if (sourceUrl || evidenceType) {
+      evidenceRecord = await prisma.verificationEvidence.create({
+        data: {
+          verificationId: verificationRecord.id,
+          evidenceType: evidenceType || 'DOCUMENT',
+          sourceUrl: sourceUrl || null,
+        }
+      });
+    }
+
+    if (entityType === 'Achievement') {
+      await prisma.achievement.update({
+        where: { id: numEntityId },
+        data: { verificationStatus: 'PENDING_REVIEW' }
+      });
+    } else if (entityType === 'SupportRequest') {
+      await prisma.supportRequest.update({
+        where: { id: numEntityId },
+        data: { approvalStatus: 'UNDER_REVIEW' }
+      });
+    }
+
+    await writeAuditLog(req.user.id, 'VERIFICATION_SUBMITTED', 'Verification', verificationRecord.id,
+      JSON.stringify({ entityType, entityId: numEntityId, category }));
+
+    const hydrated = await hydrateVerification(verificationRecord);
+    res.status(201).json({ verification: hydrated, evidence: evidenceRecord });
+  } catch (error: any) {
+    console.error('Submit verification claim failed:', error);
+    res.status(500).json({ error: error.message || 'Failed to submit verification claim' });
+  }
+});
+
+// POST /api/verifications/:id/evidence — Upload evidence for claim owned by authenticated user
+// Instruction 1.3, 1.4, 1.5, 4.4, 4.8
+app.post('/api/verifications/:id/evidence', authenticateToken, sensitiveEndpointLimiter, evidenceUpload.single('file'), async (req: any, res) => {
+  const verificationId = parseInt(req.params.id, 10);
+  if (isNaN(verificationId)) {
+    return res.status(400).json({ error: 'Invalid verification ID' });
+  }
+
+  try {
+    const verification = await prisma.verification.findUnique({
+      where: { id: verificationId }
+    });
+
+    if (!verification) {
+      return res.status(404).json({ error: 'Verification claim not found' });
+    }
+
+    // Instruction 4.4 & 4.6: Validate claim is owned by authenticated user
+    const isOwner = await checkVerificationOwnership(verification, req.user.id);
+    if (!isOwner && req.user.role !== 'ADMIN') {
+      return res.status(403).json({ error: 'You do not have permission to upload evidence for this verification claim.' });
+    }
+
+    let privateStorageKey: string | null = null;
+    let documentHash: string | null = null;
+    let originalFilename: string | null = null;
+    const { evidenceType, sourceUrl } = req.body;
+
+    if (req.file) {
+      // Instruction 1.4: Validate file signatures, MIME type, file size, and file contents (PDF, JPEG, PNG)
+      const validation = validateEvidenceFileBuffer(req.file.buffer);
+      if (!validation.isValid) {
+        return res.status(400).json({ error: validation.error || 'Invalid file format. Only PDF, JPEG, and PNG are allowed.' });
+      }
+
+      // Instruction 1.2 & 1.5: Store verification evidence in private directory outside publicly served uploads folder
+      const saved = await savePrivateEvidenceFile(req.file.buffer, validation.extension!);
+      privateStorageKey = saved.privateStorageKey;
+      documentHash = saved.documentHash;
+      originalFilename = req.file.originalname;
+    } else if (!sourceUrl) {
+      return res.status(400).json({ error: 'Either an evidence file (PDF, PNG, JPEG) or a valid sourceUrl is required.' });
+    }
+
+    const evidence = await prisma.verificationEvidence.create({
+      data: {
+        verificationId,
+        evidenceType: evidenceType || (req.file ? 'DOCUMENT' : 'URL'),
+        privateStorageKey,
+        sourceUrl: sourceUrl || null,
+        originalFilename,
+        documentHash,
+      }
+    });
+
+    // Instruction 4.8 & 6.3: Require new or resubmitted evidence to return claim to PENDING_REVIEW
+    const updatedVerification = await prisma.verification.update({
+      where: { id: verificationId },
+      data: {
+        status: 'PENDING_REVIEW',
+        verifiedBy: null,
+        verifiedAt: null,
+      }
+    });
+
+    if (verification.entityType === 'Achievement') {
+      await prisma.achievement.update({
+        where: { id: verification.entityId },
+        data: { verificationStatus: 'PENDING_REVIEW' }
+      });
+    } else if (verification.entityType === 'SupportRequest') {
+      await prisma.supportRequest.update({
+        where: { id: verification.entityId },
+        data: { approvalStatus: 'UNDER_REVIEW' }
+      });
+    }
+
+    await writeAuditLog(req.user.id, 'EVIDENCE_UPLOADED', 'VerificationEvidence', evidence.id,
+      JSON.stringify({ verificationId, evidenceType: evidence.evidenceType, filename: originalFilename }));
+
+    res.status(201).json({
+      message: 'Evidence uploaded successfully and submitted for review',
+      evidence,
+      verification: updatedVerification
+    });
+  } catch (error: any) {
+    console.error('Evidence upload failed:', error);
+    res.status(500).json({ error: error.message || 'Evidence upload failed' });
+  }
+});
+
+// GET /api/verifications/me — Authenticated user sees own verification requests and statuses
+// Instruction 4.5
+app.get('/api/verifications/me', authenticateToken, async (req: any, res) => {
+  try {
+    const athleteProfile = await prisma.athleteProfile.findUnique({
+      where: { userId: req.user.id },
+      include: {
+        achievements: { select: { id: true } },
+        supportRequests: { select: { id: true, budgetItems: { select: { id: true } } } }
+      }
+    });
+
+    if (!athleteProfile) {
+      return res.json([]);
+    }
+
+    const achievementIds = athleteProfile.achievements.map((a: any) => a.id);
+    const srIds = athleteProfile.supportRequests.map((sr: any) => sr.id);
+    const budgetItemIds = athleteProfile.supportRequests.flatMap((sr: any) => sr.budgetItems.map((b: any) => b.id));
+
+    const verifications = await prisma.verification.findMany({
+      where: {
+        OR: [
+          { entityType: 'AthleteProfile', entityId: athleteProfile.id },
+          ...(achievementIds.length > 0 ? [{ entityType: 'Achievement', entityId: { in: achievementIds } }] : []),
+          ...(srIds.length > 0 ? [{ entityType: 'SupportRequest', entityId: { in: srIds } }] : []),
+          ...(budgetItemIds.length > 0 ? [{ entityType: 'BudgetItem', entityId: { in: budgetItemIds } }] : [])
+        ]
+      },
+      include: {
+        evidence: true
+      },
+      orderBy: { updatedAt: 'desc' }
+    });
+
+    const hydrated = await Promise.all(verifications.map(hydrateVerification));
+    res.json(hydrated);
+  } catch (error: any) {
+    console.error('Fetch my verifications failed:', error);
+    res.status(500).json({ error: 'Failed to fetch verification claims' });
+  }
+});
+
+// Instruction 1.6: Protected endpoint for reviewers & document owners to retrieve private evidence files
+app.get('/api/verifications/evidence/:evidenceId/file', authenticateToken, async (req: any, res) => {
+  try {
+    const evidenceId = parseInt(req.params.evidenceId, 10);
+    if (isNaN(evidenceId)) {
+      return res.status(400).json({ error: 'Invalid evidence ID' });
+    }
+
+    const evidence = await prisma.verificationEvidence.findUnique({
+      where: { id: evidenceId },
+      include: { verification: true }
+    });
+
+    if (!evidence || !evidence.privateStorageKey) {
+      return res.status(404).json({ error: 'Evidence document not found' });
+    }
+
+    // Check authorization: reviewer (ADMIN) or document owner
+    const isOwner = await checkVerificationOwnership(evidence.verification, req.user.id);
+    const isAdmin = req.user.role === 'ADMIN';
+
+    if (!isAdmin && !isOwner) {
+      return res.status(403).json({ error: 'Access denied: You do not have permission to view this private document.' });
+    }
+
+    const filePath = getPrivateFilePath(evidence.privateStorageKey);
+    if (!filePath) {
+      return res.status(404).json({ error: 'File not found on server' });
+    }
+
+    const ext = path.extname(filePath).toLowerCase();
+    const mimeMap: { [key: string]: string } = {
+      '.pdf': 'application/pdf',
+      '.png': 'image/png',
+      '.jpg': 'image/jpeg',
+      '.jpeg': 'image/jpeg'
+    };
+    const contentType = mimeMap[ext] || 'application/octet-stream';
+
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Content-Disposition', `inline; filename="${evidence.originalFilename || path.basename(filePath)}"`);
+    res.setHeader('Cache-Control', 'private, no-cache, no-store, must-revalidate');
+
+    const stream = fs.createReadStream(filePath);
+    stream.pipe(res);
+  } catch (error: any) {
+    console.error('Retrieve private document failed:', error);
+    res.status(500).json({ error: 'Failed to retrieve document' });
+  }
+});
+
+// GET /api/verifications/documents/:key — Retrieve private document by storage key (protected)
+app.get('/api/verifications/documents/:key', authenticateToken, async (req: any, res) => {
+  try {
+    const key = req.params.key;
+    const evidence = await prisma.verificationEvidence.findFirst({
+      where: { privateStorageKey: key },
+      include: { verification: true }
+    });
+
+    if (!evidence) {
+      return res.status(404).json({ error: 'Document not found' });
+    }
+
+    const isOwner = await checkVerificationOwnership(evidence.verification, req.user.id);
+    const isAdmin = req.user.role === 'ADMIN';
+
+    if (!isAdmin && !isOwner) {
+      return res.status(403).json({ error: 'Access denied: You do not have permission to view this document.' });
+    }
+
+    const filePath = getPrivateFilePath(key);
+    if (!filePath) {
+      return res.status(404).json({ error: 'File not found on server' });
+    }
+
+    const ext = path.extname(filePath).toLowerCase();
+    const mimeMap: { [key: string]: string } = {
+      '.pdf': 'application/pdf',
+      '.png': 'image/png',
+      '.jpg': 'image/jpeg',
+      '.jpeg': 'image/jpeg'
+    };
+    const contentType = mimeMap[ext] || 'application/octet-stream';
+
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Content-Disposition', `inline; filename="${evidence.originalFilename || path.basename(filePath)}"`);
+    res.setHeader('Cache-Control', 'private, no-cache, no-store, must-revalidate');
+
+    const stream = fs.createReadStream(filePath);
+    stream.pipe(res);
+  } catch (error: any) {
+    console.error('Retrieve private document failed:', error);
+    res.status(500).json({ error: 'Failed to retrieve document' });
+  }
+});
+
+// ===================================================================
+// ACHIEVEMENTS WORKFLOW (Instruction 5)
+// ===================================================================
+
+// POST /api/achievements — Athlete submits a new achievement
+// Instruction 5.1 & 5.2
+app.post('/api/achievements', authenticateToken, sensitiveEndpointLimiter, async (req: any, res) => {
+  const {
+    title,
+    competition,
+    event,
+    date,
+    position,
+    result,
+    achievementLevel,
+    evidenceSource,
+    evidenceUrl,
+    evidenceFileId
+  } = req.body;
+
+  if (!title || !title.trim()) {
+    return res.status(400).json({ error: 'Achievement title is required' });
+  }
+
+  try {
+    const athlete = await prisma.athleteProfile.findUnique({
+      where: { userId: req.user.id }
+    });
+
+    if (!athlete) {
+      return res.status(403).json({ error: 'Only registered athletes can submit achievements' });
+    }
+
+    const validLevels = ['CLUB', 'DISTRICT', 'ZONE', 'REGIONAL', 'STATE', 'NATIONAL', 'INTERNATIONAL'];
+    const level = (achievementLevel || 'STATE').toUpperCase();
+    if (!validLevels.includes(level)) {
+      return res.status(400).json({ error: `achievementLevel must be one of: ${validLevels.join(', ')}` });
+    }
+
+    const outcome = (position || result || '').trim();
+
+    // Instruction 5.1: Create achievement and matching Verification record with PENDING_REVIEW
+    const createdAchievement = await prisma.$transaction(async (tx) => {
+      const ach = await tx.achievement.create({
+        data: {
+          athleteId: athlete.id,
+          title: title.trim(),
+          competition: competition ? competition.trim() : null,
+          event: event ? event.trim() : null,
+          position: outcome || null,
+          date: date ? date.trim() : null,
+          achievementLevel: level,
+          verificationStatus: 'PENDING_REVIEW', // Instruction 5.1
+          evidenceFileId: evidenceFileId || evidenceUrl || null,
+        }
+      });
+
+      const notes = [
+        `Competition: ${competition || 'N/A'}`,
+        `Event: ${event || 'N/A'}`,
+        `Date: ${date || 'N/A'}`,
+        `Result: ${outcome || 'N/A'}`,
+        `Level: ${level}`,
+        `Evidence Source: ${evidenceSource || 'Official Results / Certificates'}`
+      ].join(' | ');
+
+      const ver = await tx.verification.create({
+        data: {
+          entityType: 'Achievement',
+          entityId: ach.id,
+          category: 'ACHIEVEMENT',
+          status: 'PENDING_REVIEW',
+          notes,
+        }
+      });
+
+      if (evidenceUrl) {
+        await tx.verificationEvidence.create({
+          data: {
+            verificationId: ver.id,
+            evidenceType: 'CERTIFICATE',
+            sourceUrl: evidenceUrl,
+          }
+        });
+      }
+
+      return ach;
+    });
+
+    await writeAuditLog(req.user.id, 'ACHIEVEMENT_CREATED', 'Achievement', createdAchievement.id,
+      JSON.stringify({ title, competition, level }));
+
+    res.status(201).json(createdAchievement);
+  } catch (error: any) {
+    console.error('Create achievement failed:', error);
+    res.status(500).json({ error: error.message || 'Failed to create achievement' });
+  }
+});
+
+// GET /api/achievements/me — Authenticated athlete views own achievements
+app.get('/api/achievements/me', authenticateToken, async (req: any, res) => {
+  try {
+    const athlete = await prisma.athleteProfile.findUnique({
+      where: { userId: req.user.id }
+    });
+
+    if (!athlete) {
+      return res.json([]);
+    }
+
+    const achievements = await prisma.achievement.findMany({
+      where: { athleteId: athlete.id },
+      orderBy: { createdAt: 'desc' }
+    });
+
+    res.json(achievements);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch achievements' });
+  }
+});
+
+// ===================================================================
+// ADMIN — VERIFICATION MANAGEMENT (Instructions 2, 5, 6, 7)
 // ===================================================================
 
 // GET /api/admin/verifications/pending — hydrated pending verification items
 app.get('/api/admin/verifications/pending', authenticateToken, requireAdmin, async (req: any, res) => {
   try {
     const pending = await prisma.verification.findMany({
-      where: { status: 'PENDING_REVIEW' }
+      where: { status: 'PENDING_REVIEW' },
+      include: { evidence: true },
+      orderBy: { createdAt: 'desc' }
     });
 
-    // Hydrate each verification with its linked entity + athlete name
     const hydrated = await Promise.all(pending.map(hydrateVerification));
-
     res.json(hydrated);
   } catch (error) {
     console.error('Failed to fetch pending verifications:', error);
@@ -1417,7 +2091,7 @@ app.get('/api/admin/verifications/pending', authenticateToken, requireAdmin, asy
   }
 });
 
-// GET /api/admin/verifications — all verifications (with optional category/status filter)
+// GET /api/admin/verifications — all verifications with optional filtering
 app.get('/api/admin/verifications', authenticateToken, requireAdmin, async (req: any, res) => {
   try {
     const { category, status } = req.query;
@@ -1425,118 +2099,268 @@ app.get('/api/admin/verifications', authenticateToken, requireAdmin, async (req:
     if (category) where.category = category;
     if (status) where.status = status;
 
-    const verifications = await prisma.verification.findMany({ where });
+    const verifications = await prisma.verification.findMany({
+      where,
+      include: { evidence: true },
+      orderBy: { createdAt: 'desc' }
+    });
     const hydrated = await Promise.all(verifications.map(hydrateVerification));
     res.json(hydrated);
   } catch (error) {
+    console.error('Failed to fetch verifications:', error);
     res.status(500).json({ error: 'Failed to fetch verifications' });
   }
 });
 
 // POST /api/admin/verifications/:id/approve
+// Instructions 5.5, 5.6, 5.7, 6.2, 6.6, 6.7
 app.post('/api/admin/verifications/:id/approve', authenticateToken, requireAdmin, async (req: any, res) => {
   try {
     const id = parseInt(req.params.id);
     const { notes } = req.body;
 
-    const verification = await prisma.verification.update({
-      where: { id },
-      data: {
-        status: 'VERIFIED',
-        verifiedBy: req.user.id,
-        verifiedAt: new Date(),
-        notes: notes || null,
-      }
+    const verification = await prisma.verification.findUnique({
+      where: { id }
     });
 
-    // Sync denormalized Achievement.verificationStatus if this is an ACHIEVEMENT verification
-    if (verification.entityType === 'Achievement') {
-      await prisma.achievement.update({
-        where: { id: verification.entityId },
-        data: { verificationStatus: 'VERIFIED', verifiedBy: req.user.id, verifiedAt: new Date() }
-      });
+    if (!verification) {
+      return res.status(404).json({ error: 'Verification record not found' });
     }
 
-    await writeAuditLog(req.user.id, 'VERIFICATION_APPROVED', 'Verification', id,
-      JSON.stringify({ category: verification.category, entityType: verification.entityType, entityId: verification.entityId, notes }));
+    // Instruction 6.4: Validate state transition
+    if (verification.status === 'VERIFIED') {
+      return res.status(400).json({ error: 'Verification claim is already approved and verified' });
+    }
 
-    res.json(verification);
-  } catch (error) {
+    const decisionTime = new Date();
+
+    // Instruction 6.6: Atomic update across verification, target entity, and audit log
+    const updated = await prisma.$transaction(async (tx) => {
+      const v = await tx.verification.update({
+        where: { id },
+        data: {
+          status: 'VERIFIED',
+          verifiedBy: req.user.id,
+          verifiedAt: decisionTime,
+          notes: notes || verification.notes || null,
+        }
+      });
+
+      // Instruction 5.5 & 5.6: If this is an achievement verification, update that specific achievement
+      if (verification.entityType === 'Achievement') {
+        await tx.achievement.update({
+          where: { id: verification.entityId },
+          data: {
+            verificationStatus: 'VERIFIED',
+            verifiedBy: req.user.id,
+            verifiedAt: decisionTime,
+          }
+        });
+        // Instruction 5.7: Do NOT automatically verify athlete's entire profile
+      }
+
+      // Instruction 2.5: If this is a support request verification, update campaign status to APPROVED
+      if (verification.entityType === 'SupportRequest') {
+        await tx.supportRequest.update({
+          where: { id: verification.entityId },
+          data: {
+            approvalStatus: 'APPROVED'
+          }
+        });
+      }
+
+      await tx.auditLog.create({
+        data: {
+          userId: req.user.id,
+          action: 'VERIFICATION_APPROVED',
+          entityType: verification.entityType,
+          entityId: verification.entityId,
+          details: JSON.stringify({
+            verificationId: id,
+            category: verification.category,
+            notes: notes || null
+          })
+        }
+      });
+
+      return v;
+    });
+
+    res.json({ message: 'Verification approved successfully', verification: updated });
+  } catch (error: any) {
     console.error('Approve verification failed:', error);
-    res.status(500).json({ error: 'Failed to approve verification' });
+    res.status(500).json({ error: error.message || 'Failed to approve verification' });
   }
 });
 
 // POST /api/admin/verifications/:id/reject
+// Instructions 6.2, 6.5, 6.6, 6.7
 app.post('/api/admin/verifications/:id/reject', authenticateToken, requireAdmin, async (req: any, res) => {
   try {
     const id = parseInt(req.params.id);
-    const { notes } = req.body;
+    const { reason, notes } = req.body;
+    const rejectionReason = (reason || notes || '').trim();
 
-    const verification = await prisma.verification.update({
-      where: { id },
-      data: {
-        status: 'REJECTED',
-        verifiedBy: req.user.id,
-        verifiedAt: new Date(),
-        notes: notes || null,
-      }
-    });
-
-    if (verification.entityType === 'Achievement') {
-      await prisma.achievement.update({
-        where: { id: verification.entityId },
-        data: { verificationStatus: 'REJECTED', verifiedBy: req.user.id, verifiedAt: new Date() }
-      });
+    // Instruction 6.5: Require a reason when rejecting a claim
+    if (!rejectionReason) {
+      return res.status(400).json({ error: 'A specific reason is required when rejecting a verification claim' });
     }
 
-    await writeAuditLog(req.user.id, 'VERIFICATION_REJECTED', 'Verification', id,
-      JSON.stringify({ category: verification.category, entityType: verification.entityType, entityId: verification.entityId, notes }));
+    const verification = await prisma.verification.findUnique({
+      where: { id }
+    });
 
-    res.json(verification);
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to reject verification' });
+    if (!verification) {
+      return res.status(404).json({ error: 'Verification record not found' });
+    }
+
+    if (verification.status === 'REJECTED') {
+      return res.status(400).json({ error: 'Verification claim is already rejected' });
+    }
+
+    const decisionTime = new Date();
+
+    const updated = await prisma.$transaction(async (tx) => {
+      const v = await tx.verification.update({
+        where: { id },
+        data: {
+          status: 'REJECTED',
+          verifiedBy: req.user.id,
+          verifiedAt: decisionTime,
+          notes: rejectionReason,
+        }
+      });
+
+      if (verification.entityType === 'Achievement') {
+        await tx.achievement.update({
+          where: { id: verification.entityId },
+          data: {
+            verificationStatus: 'REJECTED',
+            verifiedBy: req.user.id,
+            verifiedAt: decisionTime,
+          }
+        });
+      }
+
+      if (verification.entityType === 'SupportRequest') {
+        await tx.supportRequest.update({
+          where: { id: verification.entityId },
+          data: {
+            approvalStatus: 'REJECTED'
+          }
+        });
+      }
+
+      await tx.auditLog.create({
+        data: {
+          userId: req.user.id,
+          action: 'VERIFICATION_REJECTED',
+          entityType: verification.entityType,
+          entityId: verification.entityId,
+          details: JSON.stringify({
+            verificationId: id,
+            category: verification.category,
+            reason: rejectionReason
+          })
+        }
+      });
+
+      return v;
+    });
+
+    res.json({ message: 'Verification rejected successfully', verification: updated });
+  } catch (error: any) {
+    console.error('Reject verification failed:', error);
+    res.status(500).json({ error: error.message || 'Failed to reject verification' });
   }
 });
 
 // POST /api/admin/verifications/:id/request-correction
+// Instructions 6.2, 6.5, 6.6
 app.post('/api/admin/verifications/:id/request-correction', authenticateToken, requireAdmin, async (req: any, res) => {
   try {
     const id = parseInt(req.params.id);
-    const { notes } = req.body;
+    const { notes, reason } = req.body;
+    const correctionNotes = (notes || reason || '').trim();
 
-    const verification = await prisma.verification.update({
-      where: { id },
-      data: {
-        status: 'NEEDS_CORRECTION',
-        verifiedBy: req.user.id,
-        notes: notes || null,
-      }
-    });
-
-    if (verification.entityType === 'Achievement') {
-      await prisma.achievement.update({
-        where: { id: verification.entityId },
-        data: { verificationStatus: 'NEEDS_CORRECTION' }
-      });
+    // Instruction 6.5: Require notes/reason when requesting corrections
+    if (!correctionNotes) {
+      return res.status(400).json({ error: 'Correction instructions or notes are required' });
     }
 
-    await writeAuditLog(req.user.id, 'VERIFICATION_CORRECTION_REQUESTED', 'Verification', id,
-      JSON.stringify({ category: verification.category, entityType: verification.entityType, entityId: verification.entityId, notes }));
+    const verification = await prisma.verification.findUnique({
+      where: { id }
+    });
 
-    res.json(verification);
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to request correction' });
+    if (!verification) {
+      return res.status(404).json({ error: 'Verification record not found' });
+    }
+
+    const updated = await prisma.$transaction(async (tx) => {
+      const v = await tx.verification.update({
+        where: { id },
+        data: {
+          status: 'NEEDS_CORRECTION',
+          verifiedBy: req.user.id,
+          notes: correctionNotes,
+        }
+      });
+
+      if (verification.entityType === 'Achievement') {
+        await tx.achievement.update({
+          where: { id: verification.entityId },
+          data: {
+            verificationStatus: 'NEEDS_CORRECTION'
+          }
+        });
+      }
+
+      if (verification.entityType === 'SupportRequest') {
+        await tx.supportRequest.update({
+          where: { id: verification.entityId },
+          data: {
+            approvalStatus: 'UNDER_REVIEW'
+          }
+        });
+      }
+
+      await tx.auditLog.create({
+        data: {
+          userId: req.user.id,
+          action: 'VERIFICATION_CORRECTION_REQUESTED',
+          entityType: verification.entityType,
+          entityId: verification.entityId,
+          details: JSON.stringify({
+            verificationId: id,
+            category: verification.category,
+            notes: correctionNotes
+          })
+        }
+      });
+
+      return v;
+    });
+
+    res.json({ message: 'Correction requested successfully', verification: updated });
+  } catch (error: any) {
+    console.error('Request correction failed:', error);
+    res.status(500).json({ error: error.message || 'Failed to request correction' });
   }
 });
 
 // ===================================================================
-// ADMIN — SUPPORT REQUEST MANAGEMENT (Step 7)
+// ADMIN — SUPPORT REQUEST MANAGEMENT (Instruction 2)
 // ===================================================================
 
+// GET /api/admin/support-requests — all support requests for admin portal
 app.get('/api/admin/support-requests', authenticateToken, requireAdmin, async (req: any, res) => {
   try {
+    const { status } = req.query;
+    const where: any = {};
+    if (status) where.approvalStatus = status;
+
     const requests = await prisma.supportRequest.findMany({
+      where,
       include: {
         athlete: {
           include: { user: { select: { name: true, email: true } }, sport: true }
@@ -1545,28 +2369,73 @@ app.get('/api/admin/support-requests', authenticateToken, requireAdmin, async (r
         supports: {
           include: { transaction: true }
         }
-      }
+      },
+      orderBy: { createdAt: 'desc' }
     });
     res.json(requests);
   } catch (error) {
+    console.error('Failed to fetch admin support requests:', error);
     res.status(500).json({ error: 'Failed to fetch support requests' });
   }
 });
 
+// PUT /api/admin/support-requests/:id/approve
+// Instruction 2.4 & 2.5: Approve campaign and update matching verification record consistently
 app.put('/api/admin/support-requests/:id/approve', authenticateToken, requireAdmin, async (req: any, res) => {
   try {
     const id = parseInt(req.params.id);
-    const updated = await prisma.supportRequest.update({
-      where: { id },
-      data: { approvalStatus: 'APPROVED' }
+    const existing = await prisma.supportRequest.findUnique({ where: { id } });
+    if (!existing) {
+      return res.status(404).json({ error: 'Support request not found' });
+    }
+
+    const decisionTime = new Date();
+
+    const updated = await prisma.$transaction(async (tx) => {
+      const sr = await tx.supportRequest.update({
+        where: { id },
+        data: {
+          approvalStatus: 'APPROVED'
+        }
+      });
+
+      // Consistently update matching Verification record
+      const matchingVerification = await tx.verification.findFirst({
+        where: {
+          entityType: 'SupportRequest',
+          entityId: id,
+          category: 'SUPPORT_NEED'
+        }
+      });
+
+      if (matchingVerification) {
+        await tx.verification.update({
+          where: { id: matchingVerification.id },
+          data: {
+            status: 'VERIFIED',
+            verifiedBy: req.user.id,
+            verifiedAt: decisionTime,
+          }
+        });
+      }
+
+      await tx.auditLog.create({
+        data: {
+          userId: req.user.id,
+          action: 'SUPPORT_REQUEST_APPROVED',
+          entityType: 'SupportRequest',
+          entityId: id,
+          details: JSON.stringify({ title: existing.title, targetAmount: existing.targetAmount })
+        }
+      });
+
+      return sr;
     });
 
-    await writeAuditLog(req.user.id, 'SUPPORT_REQUEST_APPROVED', 'SupportRequest', id,
-      JSON.stringify({ title: updated.title }));
-
-    res.json(updated);
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to approve support request' });
+    res.json({ message: 'Support request approved successfully', request: updated });
+  } catch (error: any) {
+    console.error('Approve support request failed:', error);
+    res.status(500).json({ error: error.message || 'Failed to approve support request' });
   }
 });
 
@@ -1655,6 +2524,282 @@ app.post('/api/athletes/:id/sponsorship-interest', authenticateToken, async (req
   } catch (error) {
     console.error('Sponsorship interest creation failed:', error);
     res.status(500).json({ error: 'Failed to submit sponsorship interest' });
+  }
+});
+
+// ===================================================================
+// POSTS & ATHLETE JOURNEY UPDATES (Instagram-Style Social Feed)
+// ===================================================================
+
+// GET /api/posts — Feed of athlete updates with cheer count and user cheered status
+app.get('/api/posts', optionalAuthenticateToken, async (req: any, res) => {
+  try {
+    const athleteId = req.query.athleteId ? parseInt(req.query.athleteId as string) : undefined;
+    const page = parseInt(req.query.page as string) || 1;
+    const limit = parseInt(req.query.limit as string) || 30;
+    const skip = (page - 1) * limit;
+
+    const where: any = {};
+    if (athleteId) {
+      where.athleteId = athleteId;
+    }
+
+    const posts = await prisma.post.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      skip,
+      take: limit,
+      include: {
+        athlete: {
+          include: {
+            user: {
+              select: {
+                id: true,
+                name: true,
+                email: true,
+                profileImageUrl: true,
+                bannerImageUrl: true,
+                role: true,
+              }
+            },
+            sport: true,
+            mediaAssets: true,
+            supportRequests: {
+              where: { lifecycleStatus: 'ACTIVE' },
+              take: 1,
+              include: { supports: true }
+            }
+          }
+        },
+        cheers: {
+          select: {
+            id: true,
+            userId: true,
+            createdAt: true,
+          }
+        },
+        _count: {
+          select: { cheers: true }
+        }
+      }
+    });
+
+    const currentUserId = req.user?.id;
+    const formatted = posts.map((post: any) => {
+      const isCheered = currentUserId
+        ? post.cheers.some((c: any) => c.userId === currentUserId)
+        : false;
+      return {
+        id: post.id,
+        athleteId: post.athleteId,
+        content: post.content,
+        mediaUrl: post.mediaUrl,
+        createdAt: post.createdAt,
+        cheerCount: post._count.cheers,
+        isCheered,
+        athlete: post.athlete,
+      };
+    });
+
+    res.json(formatted);
+  } catch (error) {
+    console.error('Fetch posts error:', error);
+    res.status(500).json({ error: 'Failed to fetch posts' });
+  }
+});
+
+// GET /api/athletes/:id/posts — Get posts for specific athlete
+app.get('/api/athletes/:id/posts', optionalAuthenticateToken, async (req: any, res) => {
+  try {
+    const athleteId = parseInt(req.params.id);
+    const posts = await prisma.post.findMany({
+      where: { athleteId },
+      orderBy: { createdAt: 'desc' },
+      include: {
+        athlete: {
+          include: {
+            user: {
+              select: {
+                id: true,
+                name: true,
+                profileImageUrl: true,
+                bannerImageUrl: true,
+              }
+            },
+            sport: true,
+            mediaAssets: true,
+            supportRequests: {
+              where: { lifecycleStatus: 'ACTIVE' },
+              take: 1
+            }
+          }
+        },
+        cheers: {
+          select: {
+            userId: true,
+          }
+        },
+        _count: {
+          select: { cheers: true }
+        }
+      }
+    });
+
+    const currentUserId = req.user?.id;
+    const formatted = posts.map(post => ({
+      id: post.id,
+      athleteId: post.athleteId,
+      content: post.content,
+      mediaUrl: post.mediaUrl,
+      createdAt: post.createdAt,
+      cheerCount: post._count.cheers,
+      isCheered: currentUserId ? post.cheers.some(c => c.userId === currentUserId) : false,
+      athlete: post.athlete,
+    }));
+
+    res.json(formatted);
+  } catch (error) {
+    console.error('Fetch athlete posts error:', error);
+    res.status(500).json({ error: 'Failed to fetch athlete posts' });
+  }
+});
+
+// POST /api/posts — Create a new journey update post (Athletes only)
+app.post('/api/posts', authenticateToken, async (req: any, res) => {
+  const { content, mediaUrl } = req.body;
+
+  if (!content || !content.trim()) {
+    return res.status(400).json({ error: 'Post caption or update text is required' });
+  }
+
+  try {
+    const athleteProfile = await prisma.athleteProfile.findUnique({
+      where: { userId: req.user.id },
+      include: {
+        user: { select: { id: true, name: true, profileImageUrl: true } },
+        sport: true,
+      }
+    });
+
+    if (!athleteProfile) {
+      return res.status(403).json({ error: 'Only registered athletes can publish journey updates' });
+    }
+
+    const post = await prisma.post.create({
+      data: {
+        athleteId: athleteProfile.id,
+        content: content.trim(),
+        mediaUrl: mediaUrl?.trim() || null,
+      },
+      include: {
+        athlete: {
+          include: {
+            user: { select: { id: true, name: true, profileImageUrl: true, bannerImageUrl: true } },
+            sport: true,
+            mediaAssets: true,
+            supportRequests: { where: { lifecycleStatus: 'ACTIVE' }, take: 1, include: { supports: true } }
+          }
+        },
+        _count: { select: { cheers: true } },
+      }
+    });
+
+    res.status(201).json({
+      id: post.id,
+      athleteId: post.athleteId,
+      content: post.content,
+      mediaUrl: post.mediaUrl,
+      createdAt: post.createdAt,
+      cheerCount: 0,
+      isCheered: false,
+      athlete: post.athlete,
+    });
+  } catch (error: any) {
+    console.error('Create post error:', error);
+    res.status(500).json({ error: error.message || 'Failed to create post' });
+  }
+});
+
+// POST /api/posts/:id/cheer — Toggle cheer (like) on a post
+app.post('/api/posts/:id/cheer', authenticateToken, async (req: any, res) => {
+  const postId = parseInt(req.params.id);
+  const userId = req.user.id;
+
+  try {
+    const post = await prisma.post.findUnique({ where: { id: postId } });
+    if (!post) {
+      return res.status(404).json({ error: 'Post not found' });
+    }
+
+    const existingCheer = await prisma.cheer.findUnique({
+      where: {
+        postId_userId: {
+          postId,
+          userId,
+        }
+      }
+    });
+
+    let cheered = false;
+    if (existingCheer) {
+      await prisma.cheer.delete({
+        where: { id: existingCheer.id }
+      });
+      cheered = false;
+    } else {
+      await prisma.cheer.create({
+        data: {
+          postId,
+          userId,
+        }
+      });
+      cheered = true;
+    }
+
+    const cheerCount = await prisma.cheer.count({
+      where: { postId }
+    });
+
+    res.json({
+      success: true,
+      cheered,
+      cheerCount,
+    });
+  } catch (error) {
+    console.error('Toggle cheer error:', error);
+    res.status(500).json({ error: 'Failed to toggle cheer' });
+  }
+});
+
+// DELETE /api/posts/:id — Delete post (Owner athlete or admin only)
+app.delete('/api/posts/:id', authenticateToken, async (req: any, res) => {
+  const postId = parseInt(req.params.id);
+
+  try {
+    const post = await prisma.post.findUnique({
+      where: { id: postId },
+      include: { athlete: true }
+    });
+
+    if (!post) {
+      return res.status(404).json({ error: 'Post not found' });
+    }
+
+    const isOwner = post.athlete.userId === req.user.id;
+    const isAdmin = req.user.role === 'ADMIN';
+
+    if (!isOwner && !isAdmin) {
+      return res.status(403).json({ error: 'You are not authorized to delete this post' });
+    }
+
+    // Delete associated cheers first
+    await prisma.cheer.deleteMany({ where: { postId } });
+    await prisma.post.delete({ where: { id: postId } });
+
+    res.json({ success: true, message: 'Post deleted successfully' });
+  } catch (error) {
+    console.error('Delete post error:', error);
+    res.status(500).json({ error: 'Failed to delete post' });
   }
 });
 

@@ -175,16 +175,30 @@ model SponsorshipInterest {
 // Polymorphic verification — one record per entity being verified.
 // No direct Prisma relation; resolved in application code via entityType/entityId.
 model Verification {
-  id         Int       @id @default(autoincrement())
-  entityType String    // "AthleteProfile" | "Achievement" | "SupportRequest" | "BudgetItem"
+  id         Int                    @id @default(autoincrement())
+  entityType String                 // "AthleteProfile" | "Achievement" | "SupportRequest" | "BudgetItem"
   entityId   Int
-  category   String    // IDENTITY | ATHLETE_AFFILIATION | ACHIEVEMENT | SUPPORT_NEED | BUDGET_EVIDENCE | EXPENSE_EVIDENCE
-  status     String    @default("NOT_SUBMITTED") // NOT_SUBMITTED | PENDING_REVIEW | VERIFIED | REJECTED | NEEDS_CORRECTION | RE_VERIFICATION_REQUIRED
+  category   String                 // IDENTITY | ATHLETE_AFFILIATION | ACHIEVEMENT | SUPPORT_NEED | BUDGET_EVIDENCE | EXPENSE_EVIDENCE
+  status     String                 @default("NOT_SUBMITTED") // NOT_SUBMITTED | PENDING_REVIEW | VERIFIED | REJECTED | NEEDS_CORRECTION | RE_VERIFICATION_REQUIRED
   verifiedBy Int?
   verifiedAt DateTime?
   notes      String?
-  createdAt  DateTime  @default(now())
-  updatedAt  DateTime  @updatedAt
+  createdAt  DateTime               @default(now())
+  updatedAt  DateTime               @updatedAt
+
+  evidence   VerificationEvidence[]
+}
+
+model VerificationEvidence {
+  id                Int          @id @default(autoincrement())
+  verificationId    Int
+  verification      Verification @relation(fields: [verificationId], references: [id], onDelete: Cascade)
+  evidenceType      String       // DOCUMENT, CERTIFICATE, GOVT_ID, FEDERATION_LETTER, COMPETITION_RESULT, URL
+  privateStorageKey String?
+  sourceUrl         String?
+  originalFilename  String?
+  uploadedAt        DateTime     @default(now())
+  documentHash      String?
 }
 
 // Linked 1:1 to Support. Uses Razorpay vocabulary for gateway status.
