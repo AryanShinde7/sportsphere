@@ -467,6 +467,32 @@ export default function DashboardScreen() {
           </TouchableOpacity>
         )}
 
+        {/* If Athlete: "Raise Support" / Start Campaign chip */}
+        {isAthlete && (
+          <TouchableOpacity
+            style={styles.storyItem}
+            onPress={() => setIsFundingModalVisible(true)}
+            activeOpacity={0.8}
+          >
+            <View
+              style={[
+                styles.myStoryAvatarWrap,
+                {
+                  borderColor: '#059669',
+                  backgroundColor: '#ECFDF5',
+                  justifyContent: 'center',
+                  alignItems: 'center',
+                },
+              ]}
+            >
+              <Ionicons name="rocket-outline" size={22} color="#059669" />
+            </View>
+            <Text style={[styles.storyName, { color: '#059669', fontWeight: '800' }]} numberOfLines={1}>
+              + Fund Goal
+            </Text>
+          </TouchableOpacity>
+        )}
+
         {/* "All" updates chip */}
         <TouchableOpacity
           style={styles.storyItem}
@@ -717,25 +743,16 @@ export default function DashboardScreen() {
 
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
             {/* Action button in header for athletes */}
-            {isAthlete && activeTab === 'posts' && (
-              <TouchableOpacity
-                style={styles.quickActionBtn}
-                onPress={() => setIsPostModalVisible(true)}
-                activeOpacity={0.8}
-              >
-                <Ionicons name="camera" size={14} color="#FFFFFF" style={{ marginRight: 4 }} />
-                <Text style={styles.quickActionBtnText}>Share</Text>
-              </TouchableOpacity>
-            )}
-
-            {isAthlete && activeTab === 'campaigns' && (
+            {isAthlete && (
               <TouchableOpacity
                 style={styles.quickActionBtn}
                 onPress={() => setIsFundingModalVisible(true)}
                 activeOpacity={0.8}
               >
-                <Ionicons name="add" size={14} color="#FFFFFF" />
-                <Text style={styles.quickActionBtnText}>New Campaign</Text>
+                <Ionicons name="rocket-outline" size={13} color="#FFFFFF" style={{ marginRight: 4 }} />
+                <Text style={styles.quickActionBtnText}>
+                  {activeTab === 'campaigns' ? 'New Campaign' : '+ Raise Support'}
+                </Text>
               </TouchableOpacity>
             )}
 
@@ -773,8 +790,13 @@ export default function DashboardScreen() {
             <PostCard
               post={item}
               currentUserId={currentUser?.id}
+              currentUserRole={currentUser?.role}
+              currentUserAvatar={currentUser?.profileImageUrl}
               onCheerToggle={handleCheerToggle}
               onDelete={handleDeletePost}
+              onCommentCountChange={(pId, count) => {
+                setPosts(prev => prev.map(p => (p.id === pId ? { ...p, commentCount: count } : p)));
+              }}
             />
           )}
           ListHeaderComponent={renderStoriesBar}

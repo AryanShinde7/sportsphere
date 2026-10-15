@@ -384,5 +384,17 @@ export const mobileApi = {
       });
       return res.data;
     },
+    getComments: async (postId: number) => {
+      const res = await apiClient.get(`/posts/${postId}/comments`);
+      return res.data;
+    },
+    addComment: async (postId: number, content: string) => {
+      const res = await apiClient.post(`/posts/${postId}/comments`, { content });
+      return res.data;
+    },
+    deleteComment: async (commentId: number) => {
+      const res = await apiClient.delete(`/comments/${commentId}`);
+      return res.data;
+    },
   },
 };

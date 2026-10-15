@@ -221,6 +221,28 @@ export default function SupportScreen() {
               );
             })()}
 
+            {/* Itemized Budget Breakdown Card */}
+            {requestDetails?.budgetItems && requestDetails.budgetItems.length > 0 && (
+              <View style={styles.budgetCard}>
+                <View style={styles.budgetCardHeader}>
+                  <Ionicons name="calculator-outline" size={14} color={PRIMARY} />
+                  <Text style={styles.budgetCardTitle}>Itemized Budget Breakdown</Text>
+                </View>
+                {requestDetails.budgetItems.map((item: any) => (
+                  <View key={item.id} style={styles.budgetItemRow}>
+                    <Text style={styles.budgetItemDesc} numberOfLines={1}>• {item.description}</Text>
+                    <Text style={styles.budgetItemAmt}>₹{item.amount?.toLocaleString('en-IN')}</Text>
+                  </View>
+                ))}
+                <View style={styles.budgetZeroFeeRow}>
+                  <Ionicons name="shield-checkmark" size={13} color="#059669" />
+                  <Text style={styles.budgetZeroFeeText}>
+                    100% of your contribution goes directly to the athlete (0% platform fee)
+                  </Text>
+                </View>
+              </View>
+            )}
+
             {error && (
               <View style={styles.errorBanner}>
                 <Ionicons name="alert-circle" size={18} color="#DC2626" />
@@ -445,6 +467,61 @@ const styles = StyleSheet.create({
     height: '100%',
     backgroundColor: PRIMARY,
     borderRadius: 4,
+  },
+  budgetCard: {
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1.5,
+    borderColor: '#E2E8F0',
+    borderRadius: 14,
+    padding: 12,
+    marginBottom: 16,
+  },
+  budgetCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 8,
+    paddingBottom: 6,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E2E8F0',
+  },
+  budgetCardTitle: {
+    fontSize: 11.5,
+    fontWeight: '800',
+    color: PRIMARY,
+    letterSpacing: 0.5,
+  },
+  budgetItemRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 3,
+  },
+  budgetItemDesc: {
+    fontSize: 12,
+    color: TEXT_DIM,
+    flex: 1,
+  },
+  budgetItemAmt: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: TEXT_MAIN,
+  },
+  budgetZeroFeeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: '#ECFDF5',
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: 8,
+    marginTop: 8,
+  },
+  budgetZeroFeeText: {
+    fontSize: 10.5,
+    fontWeight: '700',
+    color: '#065F46',
+    flex: 1,
   },
   errorBanner: {
     flexDirection: 'row',
