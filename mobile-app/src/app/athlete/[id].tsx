@@ -6,7 +6,8 @@ import {
 } from 'react-native';
 import { useLocalSearchParams, router, useFocusEffect } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { mobileApi, Storage } from '../../utils/config';
+import * as ImagePicker from 'expo-image-picker';
+import { mobileApi, Storage, resolveImageUrl } from '../../utils/config';
 import SportSearchPicker from '../../components/SportSearchPicker';
 import CreateFundingRequestModal from '../../components/CreateFundingRequestModal';
 
@@ -68,6 +69,10 @@ export default function AthleteProfileScreen() {
 
   // Create Campaign Modal State
   const [isCreateCampaignOpen, setIsCreateCampaignOpen] = useState(false);
+
+  // Photo & Banner Uploading State
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  const [uploadingBanner, setUploadingBanner] = useState(false);
 
   // Sponsorship form state
   const [showSponsorForm,  setShowSponsorForm]  = useState(false);
@@ -158,6 +163,68 @@ export default function AthleteProfileScreen() {
     }
   };
 
+  const handlePickAvatar = async () => {
+    try {
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission Required', 'We need access to your gallery to update your profile photo.');
+        return;
+      }
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.85,
+      });
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        setUploadingAvatar(true);
+        const asset = result.assets[0];
+        const res = await mobileApi.user.uploadProfileImage(asset.uri, asset.mimeType || undefined, asset.fileName || undefined);
+        if (res.user) {
+          await Storage.setItem('userData', JSON.stringify(res.user));
+        }
+        await fetchAthlete();
+        Alert.alert('Success', 'Profile photo updated successfully!');
+      }
+    } catch (err: any) {
+      console.error('Upload avatar error:', err);
+      Alert.alert('Upload Error', err.response?.data?.error || 'Failed to update profile photo.');
+    } finally {
+      setUploadingAvatar(false);
+    }
+  };
+
+  const handlePickBanner = async () => {
+    try {
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission Required', 'We need access to your gallery to update your banner.');
+        return;
+      }
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsEditing: true,
+        aspect: [16, 9],
+        quality: 0.85,
+      });
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        setUploadingBanner(true);
+        const asset = result.assets[0];
+        const res = await mobileApi.user.uploadBannerImage(asset.uri, asset.mimeType || undefined, asset.fileName || undefined);
+        if (res.user) {
+          await Storage.setItem('userData', JSON.stringify(res.user));
+        }
+        await fetchAthlete();
+        Alert.alert('Success', 'Banner updated successfully!');
+      }
+    } catch (err: any) {
+      console.error('Upload banner error:', err);
+      Alert.alert('Upload Error', err.response?.data?.error || 'Failed to update banner.');
+    } finally {
+      setUploadingBanner(false);
+    }
+  };
+
   const handleLogout = async () => {
     Alert.alert(
       'Log Out',
@@ -236,8 +303,8 @@ export default function AthleteProfileScreen() {
   const bannerAsset    = assets.find((a: any) => a.type === 'BANNER');
   const avatarAsset    = assets.find((a: any) => a.type === 'AVATAR');
   const galleryAssets  = assets.filter((a: any) => a.type === 'GALLERY');
-  const bannerUrl      = bannerAsset?.url || null;
-  const avatarUrl      = avatarAsset?.url || null;
+  const bannerUrl      = resolveImageUrl(bannerAsset?.url || athlete.user?.bannerImageUrl);
+  const avatarUrl      = resolveImageUrl(avatarAsset?.url || athlete.user?.profileImageUrl);
 
   const isVerified = athlete.verifications?.some(
     (v: any) => v.category === 'IDENTITY' && v.status === 'VERIFIED'
@@ -274,22 +341,64 @@ export default function AthleteProfileScreen() {
         <TouchableOpacity style={styles.backBtn} onPress={() => router.back()} activeOpacity={0.8}>
           <Text style={styles.backBtnText}>‹ Back</Text>
         </TouchableOpacity>
+
+        {/* Change Banner Button (for profile owner) */}
+        {isOwner && (
+          <TouchableOpacity
+            style={styles.ownerChangeBannerBtn}
+            onPress={handlePickBanner}
+            disabled={uploadingBanner}
+            activeOpacity={0.8}
+          >
+            {uploadingBanner ? (
+              <ActivityIndicator size="small" color="#FFFFFF" />
+            ) : (
+              <>
+                <Ionicons name="camera" size={13} color="#FFFFFF" style={{ marginRight: 4 }} />
+                <Text style={styles.ownerChangeBannerText}>Change Banner</Text>
+              </>
+            )}
+          </TouchableOpacity>
+        )}
       </View>
 
       {/* ── Identity card (overlapping banner) ── */}
       <View style={styles.identityCard}>
         {/* Circular avatar overlapping banner bottom */}
         <View style={styles.avatarFrame}>
-          {avatarUrl && !avatarFailed ? (
-            <Image
-              source={{ uri: avatarUrl }}
-              style={styles.avatar}
-              onError={() => setAvatarFailed(true)}
-            />
-          ) : (
-            <View style={[styles.avatar, { backgroundColor: color, justifyContent: 'center', alignItems: 'center' }]}>
-              <Text style={styles.avatarInitials}>{initials}</Text>
-            </View>
+          <TouchableOpacity
+            onPress={isOwner ? handlePickAvatar : undefined}
+            disabled={!isOwner || uploadingAvatar}
+            activeOpacity={isOwner ? 0.85 : 1}
+          >
+            {avatarUrl && !avatarFailed ? (
+              <Image
+                source={{ uri: avatarUrl }}
+                style={styles.avatar}
+                onError={() => setBannerFailed(true)}
+              />
+            ) : (
+              <View style={[styles.avatar, { backgroundColor: color, justifyContent: 'center', alignItems: 'center' }]}>
+                <Text style={styles.avatarInitials}>{initials}</Text>
+              </View>
+            )}
+
+            {uploadingAvatar && (
+              <View style={styles.avatarLoadingOverlay}>
+                <ActivityIndicator size="small" color="#FFFFFF" />
+              </View>
+            )}
+          </TouchableOpacity>
+
+          {isOwner && (
+            <TouchableOpacity
+              style={styles.avatarCameraBadge}
+              onPress={handlePickAvatar}
+              disabled={uploadingAvatar}
+              activeOpacity={0.85}
+            >
+              <Ionicons name="camera" size={11} color="#FFFFFF" />
+            </TouchableOpacity>
           )}
         </View>
 
@@ -784,6 +893,8 @@ export default function AthleteProfileScreen() {
           setIsCreateCampaignOpen(false);
           fetchAthlete();
         }}
+        athleteName={athlete?.user?.name || 'Athlete'}
+        sportName={athlete?.sport?.name || 'Sport'}
       />
     </ScrollView>
   );
@@ -813,6 +924,48 @@ const styles = StyleSheet.create({
     borderRadius: 20,
   },
   backBtnText: { color: '#fff', fontWeight: '700', fontSize: 14 },
+  ownerChangeBannerBtn: {
+    position: 'absolute',
+    top: 44,
+    right: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.65)',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.3)',
+  },
+  ownerChangeBannerText: {
+    color: '#FFFFFF',
+    fontSize: 11,
+    fontWeight: '800',
+  },
+  avatarCameraBadge: {
+    position: 'absolute',
+    bottom: 2,
+    right: 2,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: PRIMARY,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: '#FFFFFF',
+    elevation: 4,
+  },
+  avatarLoadingOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
 
   // ── Identity card ──
   identityCard: {

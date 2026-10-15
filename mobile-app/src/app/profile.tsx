@@ -1,12 +1,16 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  TextInput, ActivityIndicator, Image, Modal, Alert, RefreshControl
+  TextInput, ActivityIndicator, Image, Modal, Alert, RefreshControl,
+  Platform, Dimensions
 } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { mobileApi, Storage } from '../utils/config';
+import * as ImagePicker from 'expo-image-picker';
+import { mobileApi, Storage, resolveImageUrl } from '../utils/config';
 import SportSearchPicker from '../components/SportSearchPicker';
+
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 const PRIMARY = '#E2550B';
 const PRIMARY_LIGHT = '#FFF7ED';
@@ -30,6 +34,10 @@ export default function ProfileScreen() {
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+
+  // Photo & Banner Uploading State
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  const [uploadingBanner, setUploadingBanner] = useState(false);
 
   // Contributions stats for Contributor/Supporter
   const [contributions, setContributions] = useState<any[]>([]);
@@ -62,7 +70,7 @@ export default function ProfileScreen() {
 
   const loadProfileData = async () => {
     try {
-      // Load cached user data
+      // Load cached user data first
       const cached = await Storage.getItem('userData');
       if (cached) {
         const parsed = JSON.parse(cached);
@@ -72,12 +80,14 @@ export default function ProfileScreen() {
 
       // Fetch fresh profile from server
       const freshUser = await mobileApi.auth.getMe();
-      setUser(freshUser);
-      populateEditFields(freshUser);
-      await Storage.setItem('userData', JSON.stringify(freshUser));
+      if (freshUser) {
+        setUser(freshUser);
+        populateEditFields(freshUser);
+        await Storage.setItem('userData', JSON.stringify(freshUser));
+      }
 
       // If supporter/contributor, load their contributions ledger
-      if (freshUser.role !== 'ATHLETE') {
+      if (freshUser?.role !== 'ATHLETE') {
         const contribData = await mobileApi.user.getContributions();
         setContributions(contribData.supports || []);
         setTotalContributed(contribData.totalContributed || 0);
@@ -107,6 +117,73 @@ export default function ProfileScreen() {
     }
   };
 
+  // ─── PHOTO UPLOAD HANDLERS ───
+  const handlePickAvatar = async () => {
+    try {
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission Required', 'We need access to your gallery to update your profile photo.');
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.85,
+      });
+
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        const asset = result.assets[0];
+        setUploadingAvatar(true);
+        const res = await mobileApi.user.uploadProfileImage(asset.uri, asset.mimeType || undefined, asset.fileName || undefined);
+        if (res.user) {
+          setUser(res.user);
+          await Storage.setItem('userData', JSON.stringify(res.user));
+          Alert.alert('Success', 'Profile photo updated successfully!');
+        }
+      }
+    } catch (err: any) {
+      console.error('Pick avatar error:', err);
+      Alert.alert('Upload Failed', err.response?.data?.error || err.message || 'Could not upload photo. Please check your network.');
+    } finally {
+      setUploadingAvatar(false);
+    }
+  };
+
+  const handlePickBanner = async () => {
+    try {
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission Required', 'We need access to your gallery to update your banner image.');
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsEditing: true,
+        aspect: [16, 9],
+        quality: 0.85,
+      });
+
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        const asset = result.assets[0];
+        setUploadingBanner(true);
+        const res = await mobileApi.user.uploadBannerImage(asset.uri, asset.mimeType || undefined, asset.fileName || undefined);
+        if (res.user) {
+          setUser(res.user);
+          await Storage.setItem('userData', JSON.stringify(res.user));
+          Alert.alert('Success', 'Banner image updated successfully!');
+        }
+      }
+    } catch (err: any) {
+      console.error('Pick banner error:', err);
+      Alert.alert('Upload Failed', err.response?.data?.error || err.message || 'Could not upload banner. Please check your network.');
+    } finally {
+      setUploadingBanner(false);
+    }
+  };
+
   const handleSaveProfile = async () => {
     setSaveError('');
     setSaveSuccess('');
@@ -131,7 +208,6 @@ export default function ProfileScreen() {
           bio: editBio.trim(),
         });
 
-        // Merge updated user data
         const updatedUser = {
           ...user,
           name: editName.trim(),
@@ -193,26 +269,102 @@ export default function ProfileScreen() {
   const roleLabel = isAthlete ? 'Athlete' : (user?.role === 'SPONSOR' ? 'Corporate Sponsor' : 'Contributor / Supporter');
   const roleIcon = isAthlete ? 'fitness-outline' : (user?.role === 'SPONSOR' ? 'briefcase-outline' : 'heart-outline');
 
+  // Resolve media URLs
+  const athleteAvatar = user?.athleteProfile?.mediaAssets?.find((m: any) => m.type === 'AVATAR')?.url;
+  const athleteBanner = user?.athleteProfile?.mediaAssets?.find((m: any) => m.type === 'BANNER')?.url;
+
+  const avatarUrl = resolveImageUrl(user?.profileImageUrl || athleteAvatar);
+  const bannerUrl = resolveImageUrl(user?.bannerImageUrl || athleteBanner);
+
   return (
     <ScrollView
       style={s.container}
       contentContainerStyle={s.content}
       showsVerticalScrollIndicator={false}
       refreshControl={
-        <RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); loadProfileData(); }} tintColor={PRIMARY} />
+        <RefreshControl
+          refreshing={refreshing}
+          onRefresh={() => {
+            setRefreshing(true);
+            loadProfileData();
+          }}
+          tintColor={PRIMARY}
+        />
       }
     >
-      {/* ─── USER HEADER CARD ─── */}
+      {/* ─── BANNER HEADER ─── */}
+      <View style={s.bannerWrap}>
+        {bannerUrl ? (
+          <Image source={{ uri: bannerUrl }} style={s.bannerImage} resizeMode="cover" />
+        ) : (
+          <View style={[s.bannerImage, s.bannerFallback]}>
+            <Text style={s.bannerFallbackIcon}>{isAthlete ? '⚡' : '🏅'}</Text>
+          </View>
+        )}
+
+        {/* Scrim Overlay */}
+        <View style={s.bannerScrim} pointerEvents="none" />
+
+        {/* Change Banner Button */}
+        <TouchableOpacity
+          style={s.changeBannerBtn}
+          onPress={handlePickBanner}
+          disabled={uploadingBanner}
+          activeOpacity={0.8}
+        >
+          {uploadingBanner ? (
+            <ActivityIndicator size="small" color="#FFFFFF" />
+          ) : (
+            <>
+              <Ionicons name="camera" size={13} color="#FFFFFF" style={{ marginRight: 5 }} />
+              <Text style={s.changeBannerBtnText}>{bannerUrl ? 'Change Banner' : 'Add Banner'}</Text>
+            </>
+          )}
+        </TouchableOpacity>
+      </View>
+
+      {/* ─── USER PROFILE HEADER CARD (Overlapping Banner) ─── */}
       <View style={s.headerCard}>
-        <View style={s.avatarRow}>
-          <View style={s.avatar}>
-            <Text style={s.avatarText}>{getInitials(user?.name)}</Text>
+        <View style={s.avatarOverlapRow}>
+          {/* Circular Avatar with Camera Badge */}
+          <View style={s.avatarContainer}>
+            <TouchableOpacity
+              onPress={handlePickAvatar}
+              disabled={uploadingAvatar}
+              activeOpacity={0.85}
+              style={s.avatarFrame}
+            >
+              {avatarUrl ? (
+                <Image source={{ uri: avatarUrl }} style={s.avatarImage} />
+              ) : (
+                <View style={s.avatarFallback}>
+                  <Text style={s.avatarText}>{getInitials(user?.name)}</Text>
+                </View>
+              )}
+
+              {uploadingAvatar && (
+                <View style={s.avatarLoadingOverlay}>
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                </View>
+              )}
+            </TouchableOpacity>
+
+            {/* Camera Overlay Badge */}
+            <TouchableOpacity
+              style={s.cameraBadge}
+              onPress={handlePickAvatar}
+              disabled={uploadingAvatar}
+              activeOpacity={0.85}
+            >
+              <Ionicons name="camera" size={13} color="#FFFFFF" />
+            </TouchableOpacity>
           </View>
 
+          {/* User Details */}
           <View style={s.profileDetails}>
-            <Text style={s.userName}>{user?.name || 'SportSphere User'}</Text>
+            <Text style={s.userName} numberOfLines={1}>{user?.name || 'SportSphere User'}</Text>
             <View style={s.roleBadge}>
-              <Ionicons name={roleIcon as any} size={14} color={PRIMARY} style={{ marginRight: 4 }} />
+              <Ionicons name={roleIcon as any} size={13} color={PRIMARY} style={{ marginRight: 4 }} />
               <Text style={s.roleBadgeText}>{roleLabel}</Text>
             </View>
             <Text style={s.userEmail} numberOfLines={1}>{user?.email}</Text>
@@ -229,22 +381,35 @@ export default function ProfileScreen() {
           ) : null}
           <View style={s.contactPill}>
             <Ionicons name="calendar-outline" size={13} color={TEXT_DIM} />
-            <Text style={s.contactText}>Joined {new Date(user?.createdAt || Date.now()).toLocaleDateString('en-IN', { month: 'short', year: 'numeric' })}</Text>
+            <Text style={s.contactText}>
+              Joined {new Date(user?.createdAt || Date.now()).toLocaleDateString('en-IN', { month: 'short', year: 'numeric' })}
+            </Text>
           </View>
         </View>
 
-        {/* Edit Profile Action Button */}
-        <TouchableOpacity
-          style={s.editProfileBtn}
-          onPress={() => {
-            populateEditFields(user);
-            setIsEditModalOpen(true);
-          }}
-          activeOpacity={0.8}
-        >
-          <Ionicons name="create-outline" size={16} color={PRIMARY} style={{ marginRight: 6 }} />
-          <Text style={s.editProfileBtnText}>Edit Profile</Text>
-        </TouchableOpacity>
+        {/* Action Buttons: Edit Profile + Change Photos */}
+        <View style={{ flexDirection: 'row', gap: 8 }}>
+          <TouchableOpacity
+            style={[s.editProfileBtn, { flex: 1 }]}
+            onPress={() => {
+              populateEditFields(user);
+              setIsEditModalOpen(true);
+            }}
+            activeOpacity={0.8}
+          >
+            <Ionicons name="create-outline" size={15} color={PRIMARY} style={{ marginRight: 5 }} />
+            <Text style={s.editProfileBtnText}>Edit Details</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[s.editProfileBtn, { backgroundColor: '#F3F4F6', borderColor: BORDER }]}
+            onPress={handlePickAvatar}
+            activeOpacity={0.8}
+          >
+            <Ionicons name="image-outline" size={15} color={TEXT_MAIN} style={{ marginRight: 5 }} />
+            <Text style={[s.editProfileBtnText, { color: TEXT_MAIN }]}>Change Photo</Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
       {/* ─── ATHLETE SPECIFIC ACTIONS ─── */}
@@ -266,7 +431,9 @@ export default function ProfileScreen() {
             </View>
             <View style={s.athleteInfoItem}>
               <Text style={s.athleteInfoLabel}>Location</Text>
-              <Text style={s.athleteInfoVal}>{user.athleteProfile.city ? `${user.athleteProfile.city}, ${user.athleteProfile.state}` : 'India'}</Text>
+              <Text style={s.athleteInfoVal}>
+                {user.athleteProfile.city ? `${user.athleteProfile.city}, ${user.athleteProfile.state}` : 'India'}
+              </Text>
             </View>
           </View>
 
@@ -316,7 +483,9 @@ export default function ProfileScreen() {
             <View style={s.emptyBox}>
               <Ionicons name="heart-dislike-outline" size={32} color={TEXT_FAINT} />
               <Text style={s.emptyTitle}>No contributions yet</Text>
-              <Text style={s.emptySub}>Browse athletes in need of gear, travel, and training support to start backing Indian champions.</Text>
+              <Text style={s.emptySub}>
+                Browse athletes in need of gear, travel, and training support to start backing Indian champions.
+              </Text>
               <TouchableOpacity
                 style={s.browseBtn}
                 onPress={() => router.replace('/dashboard')}
@@ -342,11 +511,17 @@ export default function ProfileScreen() {
                       <View style={s.contribAvatar}>
                         <Text style={s.contribAvatarText}>{getInitials(athleteName)}</Text>
                       </View>
-                      <View>
+                      <View style={{ flex: 1 }}>
                         <Text style={s.contribAthleteName}>{athleteName}</Text>
-                        <Text style={s.contribCause}>{sr?.title || 'Athlete Support Campaign'}</Text>
+                        <Text style={s.contribCause} numberOfLines={1}>
+                          {sr?.title || 'Athlete Support Campaign'}
+                        </Text>
                         <Text style={s.contribDate}>
-                          {new Date(item.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
+                          {new Date(item.createdAt).toLocaleDateString('en-IN', {
+                            day: 'numeric',
+                            month: 'short',
+                            year: 'numeric',
+                          })}
                         </Text>
                       </View>
                     </View>
@@ -364,7 +539,7 @@ export default function ProfileScreen() {
         </View>
       )}
 
-      {/* ─── LOGOUT BUTTON (Moved to Profile Page) ─── */}
+      {/* ─── LOGOUT BUTTON ─── */}
       <View style={s.logoutSection}>
         <TouchableOpacity style={s.logoutBtn} onPress={handleLogout} activeOpacity={0.85}>
           <Ionicons name="log-out-outline" size={20} color={ERROR_RED} style={{ marginRight: 8 }} />
@@ -385,14 +560,23 @@ export default function ProfileScreen() {
             <View style={s.modalHeader}>
               <View>
                 <Text style={s.modalTitle}>Edit Profile</Text>
-                <Text style={s.modalSubtitle}>{isAthlete ? 'Update your athletic portfolio' : 'Update your personal details'}</Text>
+                <Text style={s.modalSubtitle}>
+                  {isAthlete ? 'Update your athletic portfolio & photos' : 'Update your personal details & photos'}
+                </Text>
               </View>
-              <TouchableOpacity onPress={() => setIsEditModalOpen(false)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+              <TouchableOpacity
+                onPress={() => setIsEditModalOpen(false)}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              >
                 <Ionicons name="close" size={24} color={TEXT_DIM} />
               </TouchableOpacity>
             </View>
 
-            <ScrollView style={s.modalScroll} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+            <ScrollView
+              style={s.modalScroll}
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator={false}
+            >
               {saveError ? (
                 <View style={s.modalErrorBox}>
                   <Text style={s.modalErrorText}>⚠ {saveError}</Text>
@@ -404,6 +588,52 @@ export default function ProfileScreen() {
                   <Text style={s.modalSuccessText}>✓ {saveSuccess}</Text>
                 </View>
               ) : null}
+
+              {/* Photos Quick Upload Row */}
+              <View style={s.modalField}>
+                <Text style={s.modalLabel}>PROFILE & BANNER PHOTOS</Text>
+                <View style={s.photoPickerRow}>
+                  {/* Avatar Picker Card */}
+                  <TouchableOpacity
+                    style={s.photoPickerCard}
+                    onPress={handlePickAvatar}
+                    activeOpacity={0.75}
+                  >
+                    {avatarUrl ? (
+                      <Image source={{ uri: avatarUrl }} style={s.photoPickerThumb} />
+                    ) : (
+                      <View style={[s.photoPickerThumb, { backgroundColor: PRIMARY_LIGHT }]}>
+                        <Ionicons name="person" size={24} color={PRIMARY} />
+                      </View>
+                    )}
+                    <View style={{ flex: 1, marginLeft: 10 }}>
+                      <Text style={s.photoPickerTitle}>Profile Photo</Text>
+                      <Text style={s.photoPickerSub}>Tap to upload avatar</Text>
+                    </View>
+                    <Ionicons name="camera-outline" size={18} color={PRIMARY} />
+                  </TouchableOpacity>
+
+                  {/* Banner Picker Card */}
+                  <TouchableOpacity
+                    style={s.photoPickerCard}
+                    onPress={handlePickBanner}
+                    activeOpacity={0.75}
+                  >
+                    {bannerUrl ? (
+                      <Image source={{ uri: bannerUrl }} style={s.photoPickerThumbBanner} resizeMode="cover" />
+                    ) : (
+                      <View style={[s.photoPickerThumbBanner, { backgroundColor: '#F3F4F6' }]}>
+                        <Ionicons name="image" size={20} color={TEXT_FAINT} />
+                      </View>
+                    )}
+                    <View style={{ flex: 1, marginLeft: 10 }}>
+                      <Text style={s.photoPickerTitle}>Banner Cover</Text>
+                      <Text style={s.photoPickerSub}>Tap to upload banner</Text>
+                    </View>
+                    <Ionicons name="camera-outline" size={18} color={PRIMARY} />
+                  </TouchableOpacity>
+                </View>
+              </View>
 
               {/* Name */}
               <View style={s.modalField}>
@@ -436,12 +666,12 @@ export default function ProfileScreen() {
                   <View style={s.modalDivider} />
                   <Text style={s.modalSectionTitle}>ATHLETIC DETAILS</Text>
 
-                  {/* Sport Search Picker (Requirement 4) */}
+                  {/* Sport Search Picker */}
                   <View style={s.modalField}>
                     <SportSearchPicker
                       selectedSportId={editSportId}
                       selectedSportName={editSportName}
-                      onSelectSport={(sport) => {
+                      onSelectSport={sport => {
                         setEditSportId(sport.id);
                         setEditSportName(sport.name);
                       }}
@@ -536,6 +766,7 @@ export default function ProfileScreen() {
                   <Text style={s.modalSaveBtnText}>SAVE CHANGES</Text>
                 )}
               </TouchableOpacity>
+              <View style={{ height: 24 }} />
             </ScrollView>
           </View>
         </View>
@@ -550,7 +781,6 @@ const s = StyleSheet.create({
     backgroundColor: BG,
   },
   content: {
-    padding: 18,
     paddingBottom: 40,
   },
   center: {
@@ -567,65 +797,160 @@ const s = StyleSheet.create({
     fontWeight: '600',
   },
 
-  // Header Card
+  // ── Banner Header ──
+  bannerWrap: {
+    width: '100%',
+    height: 155,
+    backgroundColor: '#1E293B',
+    position: 'relative',
+  },
+  bannerImage: {
+    width: '100%',
+    height: '100%',
+  },
+  bannerFallback: {
+    backgroundColor: '#1E293B',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  bannerFallbackIcon: {
+    fontSize: 48,
+    opacity: 0.25,
+  },
+  bannerScrim: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.22)',
+  },
+  changeBannerBtn: {
+    position: 'absolute',
+    top: 14,
+    right: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.65)',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.3)',
+  },
+  changeBannerBtnText: {
+    color: '#FFFFFF',
+    fontSize: 11,
+    fontWeight: '800',
+  },
+
+  // ── Overlapping Header Card ──
   headerCard: {
     backgroundColor: CARD_BG,
     borderRadius: 20,
-    padding: 18,
+    marginHorizontal: 16,
+    marginTop: -38,
+    padding: 16,
     borderWidth: 1,
     borderColor: BORDER,
     marginBottom: 16,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.04,
+    shadowOpacity: 0.08,
     shadowRadius: 10,
-    elevation: 3,
+    elevation: 4,
   },
-  avatarRow: {
+  avatarOverlapRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 14,
-    marginBottom: 14,
+    marginBottom: 12,
   },
-  avatar: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
+  avatarContainer: {
+    position: 'relative',
+    width: 74,
+    height: 74,
+  },
+  avatarFrame: {
+    width: 74,
+    height: 74,
+    borderRadius: 37,
+    borderWidth: 3,
+    borderColor: '#FFFFFF',
+    backgroundColor: PRIMARY,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  avatarImage: {
+    width: '100%',
+    height: '100%',
+  },
+  avatarFallback: {
+    width: '100%',
+    height: '100%',
     backgroundColor: PRIMARY,
     justifyContent: 'center',
     alignItems: 'center',
   },
   avatarText: {
     color: '#FFFFFF',
-    fontSize: 24,
+    fontSize: 26,
     fontWeight: '900',
+  },
+  avatarLoadingOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  cameraBadge: {
+    position: 'absolute',
+    bottom: 0,
+    right: 0,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: PRIMARY,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: '#FFFFFF',
+    elevation: 4,
   },
   profileDetails: {
     flex: 1,
   },
   userName: {
-    fontSize: 20,
+    fontSize: 18,
     fontWeight: '900',
     color: TEXT_MAIN,
-    marginBottom: 3,
+    marginBottom: 2,
   },
   roleBadge: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: PRIMARY_LIGHT,
     alignSelf: 'flex-start',
-    paddingHorizontal: 8,
-    paddingVertical: 3,
+    paddingHorizontal: 7,
+    paddingVertical: 2,
     borderRadius: 6,
-    marginBottom: 4,
+    marginBottom: 3,
   },
   roleBadgeText: {
-    fontSize: 11,
+    fontSize: 10.5,
     fontWeight: '800',
     color: PRIMARY,
   },
   userEmail: {
-    fontSize: 12.5,
+    fontSize: 12,
     color: TEXT_DIM,
     fontWeight: '500',
   },
@@ -633,7 +958,7 @@ const s = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 8,
-    marginBottom: 16,
+    marginBottom: 12,
     paddingTop: 8,
     borderTopWidth: 1,
     borderTopColor: '#F3F4F6',
@@ -643,12 +968,12 @@ const s = StyleSheet.create({
     alignItems: 'center',
     gap: 5,
     backgroundColor: '#F3F4F6',
-    paddingHorizontal: 10,
-    paddingVertical: 5,
+    paddingHorizontal: 9,
+    paddingVertical: 4,
     borderRadius: 8,
   },
   contactText: {
-    fontSize: 12,
+    fontSize: 11,
     color: TEXT_DIM,
     fontWeight: '600',
   },
@@ -659,23 +984,25 @@ const s = StyleSheet.create({
     backgroundColor: PRIMARY_LIGHT,
     borderWidth: 1.5,
     borderColor: PRIMARY,
-    borderRadius: 12,
-    paddingVertical: 10,
+    borderRadius: 10,
+    paddingVertical: 9,
+    paddingHorizontal: 12,
   },
   editProfileBtnText: {
-    fontSize: 13,
-    fontWeight: '800',
     color: PRIMARY,
+    fontSize: 12.5,
+    fontWeight: '800',
   },
 
-  // Athlete Highlight Card
+  // ── Athlete Section ──
   athleteHighlightCard: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: CARD_BG,
+    borderRadius: 16,
+    marginHorizontal: 16,
+    padding: 16,
     borderWidth: 1,
     borderColor: BORDER,
-    borderRadius: 18,
-    padding: 16,
-    marginBottom: 18,
+    marginBottom: 16,
   },
   athleteHeader: {
     flexDirection: 'row',
@@ -685,7 +1012,7 @@ const s = StyleSheet.create({
   },
   athleteHeaderTitle: {
     fontSize: 15,
-    fontWeight: '900',
+    fontWeight: '800',
     color: TEXT_MAIN,
   },
   athleteInfoGrid: {
@@ -693,37 +1020,41 @@ const s = StyleSheet.create({
     justifyContent: 'space-between',
     backgroundColor: '#F9FAFB',
     borderRadius: 12,
-    padding: 12,
-    marginBottom: 12,
+    padding: 10,
+    marginBottom: 10,
   },
   athleteInfoItem: {
+    flex: 1,
     alignItems: 'center',
   },
   athleteInfoLabel: {
-    fontSize: 11,
-    color: TEXT_FAINT,
+    fontSize: 10,
     fontWeight: '700',
+    color: TEXT_FAINT,
+    textTransform: 'uppercase',
     marginBottom: 2,
   },
   athleteInfoVal: {
-    fontSize: 13,
-    color: TEXT_MAIN,
+    fontSize: 12,
     fontWeight: '800',
+    color: TEXT_MAIN,
+    textAlign: 'center',
   },
   headlineText: {
-    fontSize: 13,
+    fontSize: 12,
     fontStyle: 'italic',
     color: TEXT_DIM,
     textAlign: 'center',
-    marginBottom: 14,
+    marginBottom: 12,
+    lineHeight: 16,
   },
   viewPublicProfileBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: PRIMARY,
-    borderRadius: 12,
-    paddingVertical: 12,
+    borderRadius: 10,
+    paddingVertical: 10,
   },
   viewPublicProfileText: {
     color: '#FFFFFF',
@@ -731,15 +1062,16 @@ const s = StyleSheet.create({
     fontWeight: '800',
   },
 
-  // Stats Grid
+  // ── Contributor Section ──
   section: {
+    marginHorizontal: 16,
     marginBottom: 20,
   },
   sectionTitle: {
     fontSize: 11,
     fontWeight: '900',
-    letterSpacing: 1.5,
-    color: TEXT_DIM,
+    letterSpacing: 1,
+    color: TEXT_FAINT,
     marginBottom: 10,
   },
   statsGrid: {
@@ -754,32 +1086,65 @@ const s = StyleSheet.create({
     borderRadius: 14,
     padding: 12,
     alignItems: 'center',
-    gap: 4,
   },
   statVal: {
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '900',
     color: TEXT_MAIN,
+    marginTop: 4,
+    marginBottom: 2,
   },
   statLabel: {
-    fontSize: 10,
+    fontSize: 9.5,
     fontWeight: '700',
     color: TEXT_FAINT,
+    textAlign: 'center',
   },
-
-  // Contributions List
+  emptyBox: {
+    backgroundColor: CARD_BG,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: BORDER,
+    padding: 24,
+    alignItems: 'center',
+  },
+  emptyTitle: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: TEXT_MAIN,
+    marginTop: 8,
+  },
+  emptySub: {
+    fontSize: 11.5,
+    color: TEXT_DIM,
+    textAlign: 'center',
+    marginTop: 4,
+    lineHeight: 16,
+    marginBottom: 14,
+  },
+  browseBtn: {
+    backgroundColor: PRIMARY,
+    paddingHorizontal: 16,
+    paddingVertical: 9,
+    borderRadius: 20,
+  },
+  browseBtnText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '800',
+  },
   contributionsList: {
-    gap: 10,
+    gap: 8,
   },
   contribItem: {
     flexDirection: 'row',
-    alignItems: 'center',
     justifyContent: 'space-between',
+    alignItems: 'center',
     backgroundColor: CARD_BG,
     borderWidth: 1,
     borderColor: BORDER,
-    borderRadius: 14,
-    padding: 14,
+    borderRadius: 12,
+    padding: 12,
   },
   contribLeft: {
     flexDirection: 'row',
@@ -788,27 +1153,27 @@ const s = StyleSheet.create({
     flex: 1,
   },
   contribAvatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#0891B2',
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: PRIMARY,
     justifyContent: 'center',
     alignItems: 'center',
   },
   contribAvatarText: {
     color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: '800',
+    fontSize: 13,
+    fontWeight: '900',
   },
   contribAthleteName: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '800',
     color: TEXT_MAIN,
   },
   contribCause: {
-    fontSize: 11.5,
+    fontSize: 11,
     color: TEXT_DIM,
-    maxWidth: 180,
+    marginTop: 1,
   },
   contribDate: {
     fontSize: 10,
@@ -817,88 +1182,56 @@ const s = StyleSheet.create({
   },
   contribRight: {
     alignItems: 'flex-end',
-    gap: 4,
+    marginLeft: 8,
   },
   contribAmount: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '900',
     color: SUCCESS_GREEN,
+    marginBottom: 3,
   },
   capturedBadge: {
-    backgroundColor: '#DCFCE7',
+    backgroundColor: '#ECFDF5',
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: 6,
   },
   capturedText: {
-    fontSize: 10,
+    fontSize: 9.5,
     fontWeight: '800',
     color: SUCCESS_GREEN,
   },
-  emptyBox: {
-    backgroundColor: CARD_BG,
-    borderWidth: 1,
-    borderColor: BORDER,
-    borderRadius: 16,
-    padding: 24,
-    alignItems: 'center',
-    gap: 6,
-  },
-  emptyTitle: {
-    fontSize: 15,
-    fontWeight: '800',
-    color: TEXT_MAIN,
-    marginTop: 4,
-  },
-  emptySub: {
-    fontSize: 12,
-    color: TEXT_DIM,
-    textAlign: 'center',
-    lineHeight: 17,
-  },
-  browseBtn: {
-    backgroundColor: PRIMARY,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 10,
-    marginTop: 10,
-  },
-  browseBtnText: {
-    color: '#FFFFFF',
-    fontSize: 12.5,
-    fontWeight: '800',
-  },
 
-  // Logout Section
+  // Logout
   logoutSection: {
-    marginTop: 10,
+    marginHorizontal: 16,
     alignItems: 'center',
-    gap: 12,
+    marginTop: 10,
   },
   logoutBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#FEE2E2',
-    borderWidth: 1.5,
+    backgroundColor: '#FEF2F2',
+    borderWidth: 1,
     borderColor: '#FCA5A5',
-    borderRadius: 14,
+    paddingVertical: 12,
+    borderRadius: 12,
     width: '100%',
-    paddingVertical: 14,
   },
   logoutText: {
     color: ERROR_RED,
-    fontSize: 13,
-    fontWeight: '900',
-    letterSpacing: 1,
+    fontSize: 12.5,
+    fontWeight: '800',
+    letterSpacing: 0.5,
   },
   versionText: {
-    fontSize: 11,
+    fontSize: 10.5,
     color: TEXT_FAINT,
-    fontWeight: '500',
+    marginTop: 12,
   },
 
-  // Modal
+  // ── Modal ──
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.5)',
@@ -909,47 +1242,88 @@ const s = StyleSheet.create({
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     maxHeight: '90%',
-    padding: 20,
-    paddingBottom: 36,
+    paddingBottom: Platform.OS === 'ios' ? 24 : 12,
   },
   modalHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 16,
+    paddingHorizontal: 20,
+    paddingTop: 18,
+    paddingBottom: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: BORDER,
   },
   modalTitle: {
-    fontSize: 18,
+    fontSize: 17,
     fontWeight: '900',
     color: TEXT_MAIN,
   },
   modalSubtitle: {
-    fontSize: 12,
+    fontSize: 11.5,
     color: TEXT_DIM,
+    marginTop: 2,
   },
   modalScroll: {
-    paddingBottom: 20,
+    paddingHorizontal: 20,
+    paddingTop: 14,
   },
   modalField: {
     marginBottom: 14,
-    gap: 5,
   },
   modalLabel: {
     fontSize: 10.5,
     fontWeight: '800',
-    letterSpacing: 1.2,
     color: TEXT_DIM,
+    letterSpacing: 0.8,
+    marginBottom: 5,
+  },
+  photoPickerRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  photoPickerCard: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F9FAFB',
+    borderWidth: 1.5,
+    borderColor: BORDER,
+    borderRadius: 12,
+    padding: 10,
+  },
+  photoPickerThumb: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  photoPickerThumbBanner: {
+    width: 44,
+    height: 32,
+    borderRadius: 6,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  photoPickerTitle: {
+    fontSize: 11.5,
+    fontWeight: '800',
+    color: TEXT_MAIN,
+  },
+  photoPickerSub: {
+    fontSize: 9.5,
+    color: TEXT_FAINT,
   },
   modalInput: {
     backgroundColor: '#F9FAFB',
     borderWidth: 1.5,
     borderColor: BORDER,
     borderRadius: 12,
-    paddingHorizontal: 14,
+    paddingHorizontal: 12,
     paddingVertical: 10,
-    fontSize: 14,
+    fontSize: 13.5,
     color: TEXT_MAIN,
-    fontWeight: '500',
   },
   modalTwoCol: {
     flexDirection: 'row',
@@ -961,25 +1335,24 @@ const s = StyleSheet.create({
     marginVertical: 14,
   },
   modalSectionTitle: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '900',
+    letterSpacing: 1,
     color: PRIMARY,
-    letterSpacing: 1.2,
     marginBottom: 12,
   },
   modalSaveBtn: {
     backgroundColor: PRIMARY,
-    paddingVertical: 14,
-    borderRadius: 14,
+    paddingVertical: 13,
+    borderRadius: 12,
     alignItems: 'center',
     marginTop: 10,
-    marginBottom: 20,
   },
   modalSaveBtnText: {
     color: '#FFFFFF',
     fontSize: 13.5,
-    fontWeight: '900',
-    letterSpacing: 1,
+    fontWeight: '800',
+    letterSpacing: 0.5,
   },
   modalErrorBox: {
     backgroundColor: '#FEF2F2',
@@ -987,12 +1360,12 @@ const s = StyleSheet.create({
     borderColor: '#FCA5A5',
     borderRadius: 10,
     padding: 10,
-    marginBottom: 14,
+    marginBottom: 12,
   },
   modalErrorText: {
     color: ERROR_RED,
     fontSize: 12,
-    fontWeight: '700',
+    fontWeight: '600',
   },
   modalSuccessBox: {
     backgroundColor: '#ECFDF5',
@@ -1000,11 +1373,11 @@ const s = StyleSheet.create({
     borderColor: '#A7F3D0',
     borderRadius: 10,
     padding: 10,
-    marginBottom: 14,
+    marginBottom: 12,
   },
   modalSuccessText: {
     color: SUCCESS_GREEN,
     fontSize: 12,
-    fontWeight: '700',
+    fontWeight: '600',
   },
 });
