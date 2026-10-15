@@ -32,14 +32,31 @@ const app = express();
 const PORT = parseInt(process.env.PORT || '5000', 10);
 const MOCK_WEBHOOK_SECRET = process.env.MOCK_WEBHOOK_SECRET || 'sportsphere_mock_webhook_secret_2026';
 
-const Razorpay = require('razorpay');
+let Razorpay: any = null;
+try {
+  Razorpay = require('razorpay');
+} catch (err) {
+  console.warn('Razorpay package could not be required:', err);
+}
+
+function isPlaceholderKey(val: string): boolean {
+  if (!val) return true;
+  const upper = val.toUpperCase();
+  return (
+    upper.includes('YOUR_KEY_ID') ||
+    upper.includes('YOUR_KEY_SECRET') ||
+    upper.includes('XXXX') ||
+    upper.includes('PLACEHOLDER') ||
+    upper.includes('TEST_KEY')
+  );
+}
 
 function getRazorpayConfig() {
   dotenv.config({ override: true });
   const keyId = process.env.RAZORPAY_KEY_ID || '';
   const keySecret = process.env.RAZORPAY_KEY_SECRET || '';
   let client: any = null;
-  if (keyId && !keyId.includes('YOUR_KEY_ID')) {
+  if (keyId && !isPlaceholderKey(keyId) && keySecret && !isPlaceholderKey(keySecret)) {
     try {
       client = new Razorpay({
         key_id: keyId,
@@ -991,6 +1008,7 @@ app.get('/api/support-requests', async (req, res) => {
         },
         budgetItems: true,
         supports: {
+          where: { status: 'SUCCESS' },
           include: {
             supporter: { select: { id: true, name: true, profileImageUrl: true } }
           }
@@ -1011,7 +1029,14 @@ app.get('/api/support-requests/:id', optionalAuthenticateToken, async (req: any,
         athlete: {
           include: { user: { select: { id: true, name: true } }, sport: true, achievements: true }
         },
-        budgetItems: true
+        budgetItems: true,
+        supports: {
+          where: { status: 'SUCCESS' },
+          orderBy: { createdAt: 'desc' },
+          include: {
+            supporter: { select: { id: true, name: true, profileImageUrl: true } }
+          }
+        }
       }
     });
     if (!request) return res.status(404).json({ error: 'Support request not found' });
@@ -1198,7 +1223,11 @@ app.post('/api/payments/razorpay/create-order', authenticateToken, sensitiveEndp
         console.log('✓ Real Razorpay Order created:', orderId);
       } catch (rzpErr: any) {
         console.error('Razorpay API order creation failed:', rzpErr);
-        return res.status(500).json({ error: `Razorpay order creation failed: ${rzpErr.error?.description || rzpErr.message}` });
+        if (process.env.NODE_ENV === 'production') {
+          return res.status(500).json({ error: `Razorpay order creation failed: ${rzpErr.error?.description || rzpErr.message}` });
+        }
+        console.warn('⚠️ Razorpay API order failed, falling back to simulated sandbox order for development');
+        orderId = generateMockId('order');
       }
     } else {
       orderId = generateMockId('order');
@@ -1261,7 +1290,7 @@ app.post('/api/payments/razorpay/verify', authenticateToken, sensitiveEndpointLi
 
   // Instruction 3.1: In production, reject payment-verification requests if valid Razorpay credentials are not configured
   if (isProd) {
-    if (!keyId || !keySecret || keyId.includes('YOUR_KEY_ID') || keySecret.includes('YOUR_KEY_SECRET')) {
+    if (!keyId || !keySecret || isPlaceholderKey(keyId) || isPlaceholderKey(keySecret)) {
       return res.status(503).json({ error: 'Razorpay credentials not properly configured in production environment.' });
     }
     // Instruction 3.5: Reject missing or invalid signatures. Never accept a placeholder signature in production.
@@ -1298,7 +1327,7 @@ app.post('/api/payments/razorpay/verify', authenticateToken, sensitiveEndpointLi
     }
 
     // Instruction 3.2: Always validate payment signature using expected order ID, payment ID, and secret. Use constant-time comparison.
-    if (keySecret && !keySecret.includes('YOUR_KEY_SECRET') && razorpay_signature) {
+    if (keySecret && !isPlaceholderKey(keySecret) && razorpay_signature) {
       if (!isProd && razorpay_signature === 'sandbox_verified_signature' && !client) {
         // Confined to explicit development/test environment without real client
       } else {
@@ -1381,10 +1410,288 @@ app.post('/api/payments/razorpay/verify', authenticateToken, sensitiveEndpointLi
 // GET /api/payments/razorpay/checkout-page — serves web checkout for Expo / Webview
 app.get('/api/payments/razorpay/checkout-page', (req: any, res) => {
   const { orderId, amount, keyId, title, name, email, phone } = req.query;
-  const { keyId: configKeyId } = getRazorpayConfig();
-  const effectiveKey = keyId || configKeyId;
+  const { keyId: configKeyId, client } = getRazorpayConfig();
+  const effectiveKey = (keyId && typeof keyId === 'string' && !isPlaceholderKey(keyId)) ? keyId : configKeyId;
+  const isRealKey = Boolean(client && effectiveKey && !isPlaceholderKey(effectiveKey as string));
+  const numAmount = parseInt(amount || '0', 10);
+  const formattedInr = (numAmount / 100).toLocaleString('en-IN');
 
-  const html = `<!DOCTYPE html>
+  if (!isRealKey) {
+    // Render authentic Razorpay Standard Checkout UI (Sandbox Mode)
+    const razorpayHtml = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Razorpay Checkout</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; -webkit-tap-highlight-color: transparent; }
+    body { background: #0c1626; display: flex; justify-content: center; align-items: center; min-height: 100vh; padding: 12px; }
+    .rzp-modal { background: #ffffff; width: 100%; max-width: 380px; border-radius: 14px; overflow: hidden; box-shadow: 0 16px 40px rgba(0,0,0,0.5); display: flex; flex-direction: column; }
+    
+    /* Razorpay Top Header */
+    .rzp-header { background: #0c2340; color: #ffffff; padding: 18px 20px; position: relative; }
+    .rzp-header-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+    .rzp-brand { display: flex; align-items: center; gap: 8px; }
+    .rzp-logo-badge { background: #0b72e7; color: #ffffff; width: 28px; height: 28px; border-radius: 6px; display: flex; justify-content: center; align-items: center; font-weight: 900; font-size: 16px; letter-spacing: -1px; }
+    .rzp-brand-text { font-size: 17px; font-weight: 800; letter-spacing: -0.4px; }
+    .rzp-test-badge { background: #ea580c; color: #fff; font-size: 10px; font-weight: 800; padding: 3px 8px; border-radius: 4px; text-transform: uppercase; letter-spacing: 0.5px; }
+    
+    .merchant-info { margin-top: 4px; }
+    .merchant-name { font-size: 14px; font-weight: 700; color: #f1f5f9; display: flex; align-items: center; gap: 5px; }
+    .verified-icon { color: #10b981; font-size: 13px; }
+    .order-desc { font-size: 12px; color: #94a3b8; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 320px; }
+    
+    .amount-bar { display: flex; justify-content: space-between; align-items: baseline; margin-top: 14px; padding-top: 12px; border-top: 1px solid rgba(255,255,255,0.12); }
+    .amount-label { font-size: 12px; color: #94a3b8; font-weight: 600; text-transform: uppercase; }
+    .amount-value { font-size: 24px; font-weight: 900; color: #ffffff; }
+
+    /* Payment Methods Tabs */
+    .method-nav { display: flex; background: #f1f5f9; border-bottom: 1px solid #e2e8f0; }
+    .nav-btn { flex: 1; padding: 11px 4px; border: none; background: transparent; font-size: 12px; font-weight: 700; color: #64748b; cursor: pointer; text-align: center; border-bottom: 2px solid transparent; transition: all 0.2s; }
+    .nav-btn.active { color: #0b72e7; border-bottom: 2px solid #0b72e7; background: #ffffff; }
+
+    /* Tab Content Area */
+    .tab-content { padding: 18px 20px; background: #ffffff; min-height: 220px; }
+    .tab-pane { display: none; }
+    .tab-pane.active { display: block; }
+
+    /* UPI Options */
+    .section-title { font-size: 12px; font-weight: 700; color: #475569; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 12px; }
+    .upi-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 14px; }
+    .upi-item { border: 1.5px solid #e2e8f0; border-radius: 10px; padding: 12px 10px; display: flex; align-items: center; gap: 8px; cursor: pointer; transition: all 0.15s; }
+    .upi-item:hover, .upi-item.selected { border-color: #0b72e7; background: #f0f7ff; }
+    .upi-item-icon { font-size: 20px; }
+    .upi-item-name { font-size: 12px; font-weight: 700; color: #1e293b; }
+    
+    .input-group { margin-top: 10px; }
+    .input-label { font-size: 11px; font-weight: 700; color: #64748b; margin-bottom: 4px; display: block; }
+    .text-input { width: 100%; border: 1.5px solid #cbd5e1; border-radius: 8px; padding: 10px 12px; font-size: 13px; outline: none; transition: border-color 0.2s; }
+    .text-input:focus { border-color: #0b72e7; }
+
+    /* Card Form */
+    .card-row { display: flex; gap: 10px; margin-top: 10px; }
+    .card-row .input-group { flex: 1; margin-top: 0; }
+    .card-brands { display: flex; gap: 6px; margin-top: 6px; }
+    .card-badge { background: #f1f5f9; color: #475569; font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 4px; border: 1px solid #e2e8f0; }
+
+    /* Netbanking Grid */
+    .nb-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 10px; }
+    .nb-item { border: 1.5px solid #e2e8f0; border-radius: 8px; padding: 10px; text-align: center; font-size: 12px; font-weight: 700; color: #1e293b; cursor: pointer; transition: all 0.15s; }
+    .nb-item:hover, .nb-item.selected { border-color: #0b72e7; background: #f0f7ff; color: #0b72e7; }
+
+    /* Bottom Action Area */
+    .rzp-footer-actions { padding: 14px 20px 18px 20px; background: #f8fafc; border-top: 1px solid #e2e8f0; }
+    .pay-button { background: #0b72e7; color: #ffffff; border: none; width: 100%; padding: 14px 16px; border-radius: 10px; font-size: 15px; font-weight: 800; cursor: pointer; display: flex; justify-content: center; align-items: center; gap: 8px; box-shadow: 0 4px 14px rgba(11, 114, 231, 0.35); transition: background 0.15s; }
+    .pay-button:active { background: #0756b1; }
+    .cancel-link { text-align: center; margin-top: 10px; font-size: 12px; color: #94a3b8; cursor: pointer; text-decoration: underline; }
+
+    .rzp-security-note { text-align: center; margin-top: 12px; font-size: 10.5px; color: #94a3b8; display: flex; justify-content: center; align-items: center; gap: 6px; }
+
+    /* Processing Overlay */
+    .processing-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(12, 22, 38, 0.95); z-index: 999; flex-direction: column; justify-content: center; align-items: center; color: #ffffff; padding: 24px; text-align: center; }
+    .rzp-spinner { width: 52px; height: 52px; border: 4px solid rgba(255,255,255,0.2); border-top-color: #0b72e7; border-radius: 50%; animation: spin 0.8s linear infinite; margin-bottom: 20px; }
+    .processing-title { font-size: 17px; font-weight: 800; margin-bottom: 6px; }
+    .processing-sub { font-size: 12px; color: #94a3b8; max-width: 280px; line-height: 1.5; }
+    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+
+  <div class="rzp-modal">
+    <!-- Razorpay Blue Header -->
+    <div class="rzp-header">
+      <div class="rzp-header-top">
+        <div class="rzp-brand">
+          <div class="rzp-logo-badge">R</div>
+          <div class="rzp-brand-text">Razorpay</div>
+        </div>
+        <div class="rzp-test-badge">Test Mode</div>
+      </div>
+
+      <div class="merchant-info">
+        <div class="merchant-name">
+          SportSphere Foundation
+          <span class="verified-icon">✓</span>
+        </div>
+        <div class="order-desc">${title || 'Athlete Funding Contribution'}</div>
+      </div>
+
+      <div class="amount-bar">
+        <span class="amount-label">Amount Payable</span>
+        <span class="amount-value">₹${formattedInr}</span>
+      </div>
+    </div>
+
+    <!-- Navigation Tabs -->
+    <div class="method-nav">
+      <button class="nav-btn active" onclick="switchTab('upi')">📱 UPI</button>
+      <button class="nav-btn" onclick="switchTab('card')">💳 Card</button>
+      <button class="nav-btn" onclick="switchTab('nb')">🏦 Netbanking</button>
+    </div>
+
+    <!-- Tab 1: UPI -->
+    <div class="tab-content">
+      <div id="tab-upi" class="tab-pane active">
+        <div class="section-title">Popular UPI Apps</div>
+        <div class="upi-grid">
+          <div class="upi-item selected" onclick="selectUpi(this, 'Google Pay')">
+            <span class="upi-item-icon">🟢</span>
+            <span class="upi-item-name">Google Pay</span>
+          </div>
+          <div class="upi-item" onclick="selectUpi(this, 'PhonePe')">
+            <span class="upi-item-icon">🟣</span>
+            <span class="upi-item-name">PhonePe</span>
+          </div>
+          <div class="upi-item" onclick="selectUpi(this, 'Paytm')">
+            <span class="upi-item-icon">🔵</span>
+            <span class="upi-item-name">Paytm UPI</span>
+          </div>
+          <div class="upi-item" onclick="selectUpi(this, 'BHIM')">
+            <span class="upi-item-icon">⚡</span>
+            <span class="upi-item-name">BHIM UPI</span>
+          </div>
+        </div>
+
+        <div class="input-group">
+          <label class="input-label">Or enter UPI ID / VPA</label>
+          <input type="text" id="upi-vpa" class="text-input" value="supporter@okhdfcbank" placeholder="e.g. yourname@upi" />
+        </div>
+      </div>
+
+      <!-- Tab 2: Cards -->
+      <div id="tab-card" class="tab-pane">
+        <div class="section-title">Credit / Debit Card</div>
+        <div class="input-group">
+          <label class="input-label">Card Number</label>
+          <input type="text" class="text-input" value="4111 •••• •••• 1111" readonly />
+          <div class="card-brands">
+            <span class="card-badge">VISA</span>
+            <span class="card-badge">Mastercard</span>
+            <span class="card-badge">RuPay</span>
+          </div>
+        </div>
+
+        <div class="card-row">
+          <div class="input-group">
+            <label class="input-label">Expiry (MM/YY)</label>
+            <input type="text" class="text-input" value="12/28" readonly />
+          </div>
+          <div class="input-group">
+            <label class="input-label">CVV</label>
+            <input type="password" class="text-input" value="123" readonly />
+          </div>
+        </div>
+
+        <div class="input-group">
+          <label class="input-label">Name on Card</label>
+          <input type="text" class="text-input" value="${name || 'SportSphere Supporter'}" />
+        </div>
+      </div>
+
+      <!-- Tab 3: Netbanking -->
+      <div id="tab-nb" class="tab-pane">
+        <div class="section-title">Popular Banks</div>
+        <div class="nb-grid">
+          <div class="nb-item selected" onclick="selectNb(this)">HDFC Bank</div>
+          <div class="nb-item" onclick="selectNb(this)">State Bank of India</div>
+          <div class="nb-item" onclick="selectNb(this)">ICICI Bank</div>
+          <div class="nb-item" onclick="selectNb(this)">Axis Bank</div>
+        </div>
+        <div class="input-group">
+          <label class="input-label">Other Banks</label>
+          <input type="text" class="text-input" value="Kotak Mahindra Bank" readonly />
+        </div>
+      </div>
+    </div>
+
+    <!-- Action Area -->
+    <div class="rzp-footer-actions">
+      <button class="pay-button" id="pay-submit-btn" onclick="executePayment()">
+        🔒 Pay ₹${formattedInr}
+      </button>
+      <div class="cancel-link" onclick="cancelPayment()">Cancel Transaction</div>
+
+      <div class="rzp-security-note">
+        <span>🛡️ Secured by Razorpay</span>
+        <span>·</span>
+        <span>PCI-DSS Certified</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Processing Spinner Overlay -->
+  <div id="processing-overlay" class="processing-overlay">
+    <div class="rzp-spinner"></div>
+    <div class="processing-title">Authorizing Payment...</div>
+    <div class="processing-sub" id="processing-sub">
+      Connecting to Razorpay gateway & securing ledger receipt for ₹${formattedInr}...
+    </div>
+  </div>
+
+  <script>
+    var selectedMethod = 'Google Pay';
+
+    function switchTab(tabId) {
+      document.querySelectorAll('.nav-btn').forEach(function(b) { b.classList.remove('active'); });
+      document.querySelectorAll('.tab-pane').forEach(function(p) { p.classList.remove('active'); });
+
+      if (tabId === 'upi') {
+        document.querySelectorAll('.nav-btn')[0].classList.add('active');
+        document.getElementById('tab-upi').classList.add('active');
+      } else if (tabId === 'card') {
+        document.querySelectorAll('.nav-btn')[1].classList.add('active');
+        document.getElementById('tab-card').classList.add('active');
+      } else if (tabId === 'nb') {
+        document.querySelectorAll('.nav-btn')[2].classList.add('active');
+        document.getElementById('tab-nb').classList.add('active');
+      }
+    }
+
+    function selectUpi(el, method) {
+      document.querySelectorAll('.upi-item').forEach(function(i) { i.classList.remove('selected'); });
+      el.classList.add('selected');
+      selectedMethod = method;
+    }
+
+    function selectNb(el) {
+      document.querySelectorAll('.nb-item').forEach(function(i) { i.classList.remove('selected'); });
+      el.classList.add('selected');
+    }
+
+    function executePayment() {
+      var overlay = document.getElementById('processing-overlay');
+      overlay.style.display = 'flex';
+
+      setTimeout(function() {
+        var payload = {
+          event: 'SUCCESS',
+          razorpay_payment_id: 'pay_' + Math.random().toString(36).substring(2, 12),
+          razorpay_order_id: '${orderId}',
+          razorpay_signature: 'sandbox_verified_signature'
+        };
+
+        if (window.ReactNativeWebView) {
+          window.ReactNativeWebView.postMessage(JSON.stringify(payload));
+        } else {
+          alert('Payment Successful! ID: ' + payload.razorpay_payment_id);
+        }
+      }, 1400);
+    }
+
+    function cancelPayment() {
+      if (window.ReactNativeWebView) {
+        window.ReactNativeWebView.postMessage(JSON.stringify({ event: 'CANCELLED' }));
+      }
+    }
+  </script>
+</body>
+</html>`;
+    return res.send(razorpayHtml);
+  }
+
+  // Real Razorpay Checkout flow with verified API credentials
+  const realHtml = `<!DOCTYPE html>
 <html>
 <head>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -1400,7 +1707,7 @@ app.get('/api/payments/razorpay/checkout-page', (req: any, res) => {
   <div class="card">
     <h3 style="color:#E2550B;margin-top:0;">SportSphere Verified Backing</h3>
     <p style="font-size:14px;color:#94A3B8;">${title || 'Athlete Support'}</p>
-    <p style="font-size:24px;font-weight:900;margin:16px 0;">₹${(parseInt(amount || '0') / 100).toLocaleString('en-IN')}</p>
+    <p style="font-size:24px;font-weight:900;margin:16px 0;">₹${formattedInr}</p>
     <button class="btn" id="pay-btn" onclick="openCheckout()">Open Razorpay Checkout</button>
   </div>
   <script>
@@ -1457,7 +1764,7 @@ app.get('/api/payments/razorpay/checkout-page', (req: any, res) => {
 </body>
 </html>`;
 
-  res.send(html);
+  res.send(realHtml);
 });
 
 // POST /api/payments/razorpay/webhook — processes payment confirmation from Razorpay webhook

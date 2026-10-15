@@ -40,12 +40,16 @@ export default function SupportScreen() {
   const [razorpayOrder, setRazorpayOrder] = useState<any>(null);
 
   useEffect(() => {
-    if (id) {
+    if (!id) return;
+    const loadDetails = () => {
       mobileApi.support
         .getSupportRequest(id as string)
         .then((data) => setRequestDetails(data))
         .catch((err) => console.log('Could not fetch request details:', err));
-    }
+    };
+    loadDetails();
+    const interval = setInterval(loadDetails, 3500);
+    return () => clearInterval(interval);
   }, [id]);
 
   const handleInitiatePayment = async () => {
@@ -96,6 +100,9 @@ export default function SupportScreen() {
         setSuccess(true);
       } else if (parsed.event === 'CANCELLED') {
         setIsRazorpayModalVisible(false);
+      } else if (parsed.event === 'FAILED') {
+        setIsRazorpayModalVisible(false);
+        setError(parsed.error || 'Payment was not completed. Please try again.');
       }
     } catch (e: any) {
       console.warn('Checkout postMessage error:', e);
@@ -189,17 +196,30 @@ export default function SupportScreen() {
               </View>
             </View>
 
-            {requestDetails && (
-              <View style={styles.targetBanner}>
-                <Text style={styles.targetAthlete}>
-                  Athlete: {requestDetails.athlete?.user?.name || 'Verified Athlete'}
-                </Text>
-                <Text style={styles.targetGoal}>{requestDetails.title}</Text>
-                <Text style={styles.targetRaised}>
-                  Currently Raised: ₹{requestDetails.amountSupported?.toLocaleString('en-IN')} of ₹{requestDetails.targetAmount?.toLocaleString('en-IN')}
-                </Text>
-              </View>
-            )}
+            {requestDetails && (() => {
+              const target = requestDetails.targetAmount || 1;
+              const raised = requestDetails.amountSupported || 0;
+              const rawPct = Math.round((raised / target) * 100);
+              const barFill = Math.min(Math.max(rawPct, raised > 0 ? 3 : 0), 100);
+
+              return (
+                <View style={styles.targetBanner}>
+                  <Text style={styles.targetAthlete}>
+                    Athlete: {requestDetails.athlete?.user?.name || 'Verified Athlete'}
+                  </Text>
+                  <Text style={styles.targetGoal}>{requestDetails.title}</Text>
+                  <View style={styles.targetProgressRow}>
+                    <Text style={styles.targetRaised}>
+                      Raised: ₹{raised.toLocaleString('en-IN')} of ₹{target.toLocaleString('en-IN')}
+                    </Text>
+                    <Text style={styles.targetProgressPct}>{rawPct}%</Text>
+                  </View>
+                  <View style={styles.targetProgressTrack}>
+                    <View style={[styles.targetProgressFill, { width: `${barFill}%` as any }]} />
+                  </View>
+                </View>
+              );
+            })()}
 
             {error && (
               <View style={styles.errorBanner}>
@@ -400,7 +420,31 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
     color: TEXT_DIM,
+  },
+  targetProgressRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 6,
+    marginBottom: 4,
+  },
+  targetProgressPct: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: PRIMARY,
+  },
+  targetProgressTrack: {
+    height: 7,
+    backgroundColor: '#E5E7EB',
+    borderRadius: 4,
+    overflow: 'hidden',
     marginTop: 2,
+    marginBottom: 2,
+  },
+  targetProgressFill: {
+    height: '100%',
+    backgroundColor: PRIMARY,
+    borderRadius: 4,
   },
   errorBanner: {
     flexDirection: 'row',

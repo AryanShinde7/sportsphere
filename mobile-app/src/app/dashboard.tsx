@@ -87,9 +87,10 @@ function AthleteCard({ item }: { item: any }) {
   const icon     = SPORT_ICONS[item.sport?.name] || '🏅';
   const color    = getColor(item.user?.name || 'Athlete');
   const initials = getInitials(item.user?.name || 'Athlete');
-  const pct      = req && req.targetAmount > 0
-    ? Math.min(Math.round((req.amountSupported / req.targetAmount) * 100), 100)
+  const rawPct   = req && req.targetAmount > 0
+    ? Math.round((req.amountSupported / req.targetAmount) * 100)
     : 0;
+  const barFill  = Math.min(Math.max(rawPct, req && req.amountSupported > 0 ? 3 : 0), 100);
 
   const isVerified = item.verifications?.some(
     (v: any) => v.category === 'IDENTITY' && v.status === 'VERIFIED'
@@ -176,11 +177,11 @@ function AthleteCard({ item }: { item: any }) {
 
           <View style={styles.fundingMeta}>
             <Text style={styles.fundingRaised}>{inr(req.amountSupported)} raised</Text>
-            <Text style={styles.fundingPct}>{pct}% funded</Text>
+            <Text style={styles.fundingPct}>{rawPct}% funded</Text>
           </View>
 
           <View style={styles.fundingTrack}>
-            <View style={[styles.fundingFill, { width: `${Math.max(pct, 2)}%` as any }]} />
+            <View style={[styles.fundingFill, { width: `${barFill}%` as any }]} />
           </View>
 
           <View style={styles.fundingFooter}>
@@ -266,15 +267,15 @@ export default function DashboardScreen() {
     }
   };
 
-  const fetchCampaigns = async () => {
+  const fetchCampaigns = async (silent = false) => {
     try {
-      setCampaignsLoading(true);
+      if (!silent) setCampaignsLoading(true);
       const data = await mobileApi.support.getAllSupportRequests();
       setCampaigns(data);
     } catch (err) {
       console.error('Fetch campaigns error:', err);
     } finally {
-      setCampaignsLoading(false);
+      if (!silent) setCampaignsLoading(false);
     }
   };
 
@@ -309,9 +310,17 @@ export default function DashboardScreen() {
   useFocusEffect(
     useCallback(() => {
       fetchPosts();
-      fetchCampaigns();
+      fetchCampaigns(true);
       fetchAthletes();
       loadUserData();
+
+      // Real-time polling for live progress bar & campaigns across all users
+      const interval = setInterval(() => {
+        fetchCampaigns(true);
+        fetchAthletes();
+      }, 3500);
+
+      return () => clearInterval(interval);
     }, [])
   );
 
@@ -733,7 +742,7 @@ export default function DashboardScreen() {
             {/* Profile Avatar Icon */}
             <TouchableOpacity
               style={styles.profileHeaderBtn}
-              onPress={() => router.push('/profile')}
+              onPress={() => router.push('/profile' as any)}
               activeOpacity={0.8}
             >
               {currentUser?.profileImageUrl ? (
@@ -966,7 +975,7 @@ export default function DashboardScreen() {
           {/* 4. Profile Tab */}
           <TouchableOpacity
             style={styles.navItem}
-            onPress={() => router.push('/profile')}
+            onPress={() => router.push('/profile' as any)}
             activeOpacity={0.7}
           >
             <Ionicons name="person-circle-outline" size={24} color={TEXT_DIM} />
