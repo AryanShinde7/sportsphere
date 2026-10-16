@@ -62,9 +62,10 @@ export default function CampaignCard({ campaign }: CampaignCardProps) {
   const rawAvatar = athlete?.mediaAssets?.find((m: any) => m.type === 'AVATAR')?.url || user?.profileImageUrl;
   const avatarUrl = resolveImageUrl(rawAvatar);
 
-  const pct = campaign.targetAmount > 0
-    ? Math.min(Math.round((campaign.amountSupported / campaign.targetAmount) * 100), 100)
+  const rawPct = campaign.targetAmount > 0
+    ? Math.round((campaign.amountSupported / campaign.targetAmount) * 100)
     : 0;
+  const barFill = Math.min(Math.max(rawPct, campaign.amountSupported > 0 ? 3 : 0), 100);
 
   const backersCount = campaign.supports?.length || 0;
   const budgetItems: any[] = campaign.budgetItems || [];
@@ -145,7 +146,7 @@ export default function CampaignCard({ campaign }: CampaignCardProps) {
               <Text style={styles.goalSub}>raised of {inr(campaign.targetAmount)}</Text>
             </View>
             <View style={{ alignItems: 'flex-end' }}>
-              <Text style={styles.pctText}>{pct}%</Text>
+              <Text style={styles.pctText}>{rawPct}%</Text>
               <Text style={styles.backersSub}>
                 {backersCount} backer{backersCount !== 1 ? 's' : ''}
               </Text>
@@ -153,7 +154,7 @@ export default function CampaignCard({ campaign }: CampaignCardProps) {
           </View>
 
           <View style={styles.track}>
-            <View style={[styles.fill, { width: `${Math.max(pct, 2)}%` as any }]} />
+            <View style={[styles.fill, { width: `${barFill}%` as any }]} />
           </View>
         </View>
 

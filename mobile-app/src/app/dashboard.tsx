@@ -87,9 +87,10 @@ function AthleteCard({ item }: { item: any }) {
   const icon     = SPORT_ICONS[item.sport?.name] || '🏅';
   const color    = getColor(item.user?.name || 'Athlete');
   const initials = getInitials(item.user?.name || 'Athlete');
-  const pct      = req && req.targetAmount > 0
-    ? Math.min(Math.round((req.amountSupported / req.targetAmount) * 100), 100)
+  const rawPct   = req && req.targetAmount > 0
+    ? Math.round((req.amountSupported / req.targetAmount) * 100)
     : 0;
+  const barFill  = Math.min(Math.max(rawPct, req && req.amountSupported > 0 ? 3 : 0), 100);
 
   const isVerified = item.verifications?.some(
     (v: any) => v.category === 'IDENTITY' && v.status === 'VERIFIED'
@@ -176,11 +177,11 @@ function AthleteCard({ item }: { item: any }) {
 
           <View style={styles.fundingMeta}>
             <Text style={styles.fundingRaised}>{inr(req.amountSupported)} raised</Text>
-            <Text style={styles.fundingPct}>{pct}% funded</Text>
+            <Text style={styles.fundingPct}>{rawPct}% funded</Text>
           </View>
 
           <View style={styles.fundingTrack}>
-            <View style={[styles.fundingFill, { width: `${Math.max(pct, 2)}%` as any }]} />
+            <View style={[styles.fundingFill, { width: `${barFill}%` as any }]} />
           </View>
 
           <View style={styles.fundingFooter}>
@@ -266,15 +267,15 @@ export default function DashboardScreen() {
     }
   };
 
-  const fetchCampaigns = async () => {
+  const fetchCampaigns = async (silent = false) => {
     try {
-      setCampaignsLoading(true);
+      if (!silent) setCampaignsLoading(true);
       const data = await mobileApi.support.getAllSupportRequests();
       setCampaigns(data);
     } catch (err) {
       console.error('Fetch campaigns error:', err);
     } finally {
-      setCampaignsLoading(false);
+      if (!silent) setCampaignsLoading(false);
     }
   };
 
@@ -309,9 +310,17 @@ export default function DashboardScreen() {
   useFocusEffect(
     useCallback(() => {
       fetchPosts();
-      fetchCampaigns();
+      fetchCampaigns(true);
       fetchAthletes();
       loadUserData();
+
+      // Real-time polling for live progress bar & campaigns across all users
+      const interval = setInterval(() => {
+        fetchCampaigns(true);
+        fetchAthletes();
+      }, 3500);
+
+      return () => clearInterval(interval);
     }, [])
   );
 
@@ -455,6 +464,32 @@ export default function DashboardScreen() {
               </View>
             </View>
             <Text style={styles.storyName} numberOfLines={1}>Your Update</Text>
+          </TouchableOpacity>
+        )}
+
+        {/* If Athlete: "Raise Support" / Start Campaign chip */}
+        {isAthlete && (
+          <TouchableOpacity
+            style={styles.storyItem}
+            onPress={() => setIsFundingModalVisible(true)}
+            activeOpacity={0.8}
+          >
+            <View
+              style={[
+                styles.myStoryAvatarWrap,
+                {
+                  borderColor: '#059669',
+                  backgroundColor: '#ECFDF5',
+                  justifyContent: 'center',
+                  alignItems: 'center',
+                },
+              ]}
+            >
+              <Ionicons name="rocket-outline" size={22} color="#059669" />
+            </View>
+            <Text style={[styles.storyName, { color: '#059669', fontWeight: '800' }]} numberOfLines={1}>
+              + Fund Goal
+            </Text>
           </TouchableOpacity>
         )}
 
@@ -708,32 +743,23 @@ export default function DashboardScreen() {
 
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
             {/* Action button in header for athletes */}
-            {isAthlete && activeTab === 'posts' && (
-              <TouchableOpacity
-                style={styles.quickActionBtn}
-                onPress={() => setIsPostModalVisible(true)}
-                activeOpacity={0.8}
-              >
-                <Ionicons name="camera" size={14} color="#FFFFFF" style={{ marginRight: 4 }} />
-                <Text style={styles.quickActionBtnText}>Share</Text>
-              </TouchableOpacity>
-            )}
-
-            {isAthlete && activeTab === 'campaigns' && (
+            {isAthlete && (
               <TouchableOpacity
                 style={styles.quickActionBtn}
                 onPress={() => setIsFundingModalVisible(true)}
                 activeOpacity={0.8}
               >
-                <Ionicons name="add" size={14} color="#FFFFFF" />
-                <Text style={styles.quickActionBtnText}>New Campaign</Text>
+                <Ionicons name="rocket-outline" size={13} color="#FFFFFF" style={{ marginRight: 4 }} />
+                <Text style={styles.quickActionBtnText}>
+                  {activeTab === 'campaigns' ? 'New Campaign' : '+ Raise Support'}
+                </Text>
               </TouchableOpacity>
             )}
 
             {/* Profile Avatar Icon */}
             <TouchableOpacity
               style={styles.profileHeaderBtn}
-              onPress={() => router.push('/profile')}
+              onPress={() => router.push('/profile' as any)}
               activeOpacity={0.8}
             >
               {currentUser?.profileImageUrl ? (
@@ -764,8 +790,13 @@ export default function DashboardScreen() {
             <PostCard
               post={item}
               currentUserId={currentUser?.id}
+              currentUserRole={currentUser?.role}
+              currentUserAvatar={currentUser?.profileImageUrl}
               onCheerToggle={handleCheerToggle}
               onDelete={handleDeletePost}
+              onCommentCountChange={(pId, count) => {
+                setPosts(prev => prev.map(p => (p.id === pId ? { ...p, commentCount: count } : p)));
+              }}
             />
           )}
           ListHeaderComponent={renderStoriesBar}
@@ -966,7 +997,7 @@ export default function DashboardScreen() {
           {/* 4. Profile Tab */}
           <TouchableOpacity
             style={styles.navItem}
-            onPress={() => router.push('/profile')}
+            onPress={() => router.push('/profile' as any)}
             activeOpacity={0.7}
           >
             <Ionicons name="person-circle-outline" size={24} color={TEXT_DIM} />

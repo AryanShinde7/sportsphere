@@ -4,12 +4,18 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios, { AxiosInstance, AxiosRequestConfig } from 'axios';
 
 export const getApiUrl = () => {
+  // 1. Explicit environment variable override takes top priority
+  if (process.env.EXPO_PUBLIC_API_URL) {
+    return process.env.EXPO_PUBLIC_API_URL;
+  }
+
+  // 2. Web browser
   if (Platform.OS === 'web' && typeof window !== 'undefined') {
     const host = window.location?.hostname || 'localhost';
     return `http://${host}:5000/api`;
   }
 
-  // 1. Automatically detect Metro host IP (matches whatever Wi-Fi network the phone is on)
+  // 3. Automatically detect Metro host IP (matches Wi-Fi network the phone is on)
   const hostUri =
     Constants.expoConfig?.hostUri ||
     (Constants as any).manifest2?.extra?.expoGo?.debuggerHost ||
@@ -24,13 +30,8 @@ export const getApiUrl = () => {
     return `http://${ip}:5000/api`;
   }
 
-  // 2. Explicit environment variable override
-  if (process.env.EXPO_PUBLIC_API_URL) {
-    return process.env.EXPO_PUBLIC_API_URL;
-  }
-
-  // 3. Fallback to current LAN IP
-  return 'http://192.168.1.10:5000/api';
+  // 4. Fallback to active LAN IP
+  return 'http://10.30.25.47:5000/api';
 };
 
 export const API_URL = getApiUrl();
@@ -381,6 +382,18 @@ export const mobileApi = {
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
       });
+      return res.data;
+    },
+    getComments: async (postId: number) => {
+      const res = await apiClient.get(`/posts/${postId}/comments`);
+      return res.data;
+    },
+    addComment: async (postId: number, content: string) => {
+      const res = await apiClient.post(`/posts/${postId}/comments`, { content });
+      return res.data;
+    },
+    deleteComment: async (commentId: number) => {
+      const res = await apiClient.delete(`/comments/${commentId}`);
       return res.data;
     },
   },

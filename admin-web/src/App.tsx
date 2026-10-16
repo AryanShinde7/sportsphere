@@ -259,7 +259,10 @@ function AthleteRow({ athlete, index }: { athlete: any; index: number }) {
   const name = athlete.user?.name || 'Unknown';
   const color = getAvatarColor(name);
   const req = athlete.supportRequests?.[0];
-  const pct = req ? Math.min(Math.round((req.amountSupported / req.targetAmount) * 100), 100) : 0;
+  const rawPct = req && req.targetAmount > 0
+    ? Math.round((req.amountSupported / req.targetAmount) * 100)
+    : 0;
+  const barFill = Math.min(Math.max(rawPct, req && req.amountSupported > 0 ? 3 : 0), 100);
 
   return (
     <div className="list-item" style={{ animationDelay: `${index * 40}ms` }}>
@@ -278,10 +281,10 @@ function AthleteRow({ athlete, index }: { athlete: any; index: number }) {
         {req ? (
           <>
             <p style={{ fontSize: '0.6875rem', fontWeight: 700, color: 'var(--primary)', marginBottom: 4 }}>
-              {pct}% funded
+              {rawPct}% funded
             </p>
             <div className="progress-bar" style={{ width: 80 }}>
-              <div className="progress-fill" style={{ width: `${pct}%` }} />
+              <div className="progress-fill" style={{ width: `${barFill}%` }} />
             </div>
           </>
         ) : (
@@ -418,10 +421,15 @@ function Dashboard({ user, onLogout }: { user: any; onLogout: () => void }) {
   const [updatingSponsorId, setUpdatingSponsorId] = useState<number | null>(null);
 
   useEffect(() => {
-    fetchData();
+    fetchData(true);
+    const interval = setInterval(() => {
+      fetchData(false);
+    }, 4000);
+    return () => clearInterval(interval);
   }, []);
 
-  const fetchData = async () => {
+  const fetchData = async (isInitial = false) => {
+    if (isInitial) setLoading(true);
     try {
       const [dashRes, athRes, sponRes] = await Promise.all([
         adminApi.getDashboard(),
@@ -433,8 +441,9 @@ function Dashboard({ user, onLogout }: { user: any; onLogout: () => void }) {
       setSponsorships(sponRes || []);
     } catch (err) {
       console.error('Failed to load dashboard:', err);
+    } finally {
+      if (isInitial) setLoading(false);
     }
-    setLoading(false);
   };
 
   const handleUpdateSponsorshipStatus = async (id: number, newStatus: string) => {
