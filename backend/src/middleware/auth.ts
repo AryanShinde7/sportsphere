@@ -37,7 +37,9 @@ export interface AuthenticatedRequest extends Request {
  */
 export const authenticateToken = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
   const authHeader = req.headers['authorization'];
-  const token = authHeader && authHeader.split(' ')[1];
+  const headerToken = authHeader && authHeader.split(' ')[1];
+  const queryToken = typeof req.query?.token === 'string' ? req.query.token : undefined;
+  const token = headerToken || queryToken;
 
   if (!token) {
     return res.status(401).json({ error: 'Access denied: No token provided' });
@@ -81,7 +83,9 @@ export const authenticateToken = async (req: AuthenticatedRequest, res: Response
  */
 export const optionalAuthenticateToken = async (req: AuthenticatedRequest, _res: Response, next: NextFunction) => {
   const authHeader = req.headers['authorization'];
-  const token = authHeader && authHeader.split(' ')[1];
+  const headerToken = authHeader && authHeader.split(' ')[1];
+  const queryToken = typeof req.query?.token === 'string' ? req.query.token : undefined;
+  const token = headerToken || queryToken;
 
   if (!token) {
     req.user = null;

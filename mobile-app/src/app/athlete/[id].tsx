@@ -309,6 +309,9 @@ export default function AthleteProfileScreen() {
   const isVerified = athlete.verifications?.some(
     (v: any) => v.category === 'IDENTITY' && v.status === 'VERIFIED'
   );
+  const isPending = athlete.verifications?.some(
+    (v: any) => v.category === 'IDENTITY' && v.status === 'PENDING_REVIEW'
+  );
 
   const color    = getColor(athlete.user?.name || 'Athlete');
   const initials = getInitials(athlete.user?.name || 'Athlete');
@@ -406,11 +409,16 @@ export default function AthleteProfileScreen() {
         <View style={styles.identityBody}>
           <View style={styles.nameRow}>
             <Text style={styles.name}>{athlete.user.name}</Text>
-            {isVerified && (
+            {isVerified ? (
               <View style={styles.verifiedBadge}>
                 <Ionicons name="checkmark-circle" size={14} color="#059669" />
               </View>
-            )}
+            ) : isPending ? (
+              <View style={[styles.verifiedBadge, { backgroundColor: '#FEF3C7', paddingHorizontal: 6, width: 'auto', height: 20, borderRadius: 10, flexDirection: 'row', alignItems: 'center', gap: 3 }]}>
+                <Ionicons name="time" size={11} color="#D97706" />
+                <Text style={{ fontSize: 9, fontWeight: '700', color: '#B45309' }}>IN REVIEW</Text>
+              </View>
+            ) : null}
           </View>
 
           {isOwner && (
@@ -432,6 +440,18 @@ export default function AthleteProfileScreen() {
 
           {athlete.headline ? (
             <Text style={styles.headline}>{athlete.headline}</Text>
+          ) : null}
+
+          {isVerified && athlete.publicVerificationSummary ? (
+            <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4, gap: 4 }}>
+              <Ionicons name="shield-checkmark" size={12} color="#059669" />
+              <Text style={{ fontSize: 11, fontWeight: '600', color: '#059669' }}>{athlete.publicVerificationSummary}</Text>
+            </View>
+          ) : isPending ? (
+            <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4, gap: 4 }}>
+              <Ionicons name="time-outline" size={12} color="#D97706" />
+              <Text style={{ fontSize: 11, fontWeight: '600', color: '#B45309' }}>Identity Verification Pending Admin Review</Text>
+            </View>
           ) : null}
 
           <Text style={styles.sportMeta}>

@@ -188,11 +188,11 @@ export default function CreateFundingRequestModal({
       });
 
       Alert.alert(
-        '🎉 Campaign Published!',
-        `Your funding request of ${inr(targetAmount)} is now LIVE on SportSphere Home Feed. Supporters can now contribute directly via Razorpay.`,
+        '📋 Campaign Submitted for Review!',
+        `Your funding request of ${inr(targetAmount)} has been submitted to the admin verification queue. Once approved by a compliance reviewer, it will go live on the Home Feed for contributions.`,
         [
           {
-            text: 'Go to Feed',
+            text: 'View Status',
             onPress: () => {
               onSuccess(created);
               onClose();

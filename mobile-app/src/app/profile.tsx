@@ -62,6 +62,16 @@ export default function ProfileScreen() {
   const [saveError, setSaveError] = useState('');
   const [saveSuccess, setSaveSuccess] = useState('');
 
+  // Verification Modal & Submission State
+  const [isVerificationModalOpen, setIsVerificationModalOpen] = useState(false);
+  const [verificationCategory, setVerificationCategory] = useState<'IDENTITY' | 'ATHLETE_AFFILIATION' | 'ACHIEVEMENT'>('IDENTITY');
+  const [verificationNotes, setVerificationNotes] = useState('');
+  const [verificationSourceUrl, setVerificationSourceUrl] = useState('');
+  const [verificationDocFile, setVerificationDocFile] = useState<{ uri: string; name: string; mimeType?: string } | null>(null);
+  const [submittingVerification, setSubmittingVerification] = useState(false);
+  const [verificationError, setVerificationError] = useState('');
+  const [verificationsList, setVerificationsList] = useState<any[]>([]);
+
   useFocusEffect(
     useCallback(() => {
       loadProfileData();
@@ -86,6 +96,16 @@ export default function ProfileScreen() {
         await Storage.setItem('userData', JSON.stringify(freshUser));
       }
 
+      // If athlete, fetch their verifications
+      if (freshUser?.role === 'ATHLETE') {
+        try {
+          const vData = await mobileApi.verification.getMyVerifications();
+          setVerificationsList(Array.isArray(vData) ? vData : (vData?.verifications || []));
+        } catch (vErr) {
+          console.warn('Could not load verifications list', vErr);
+        }
+      }
+
       // If supporter/contributor, load their contributions ledger
       if (freshUser?.role !== 'ATHLETE') {
         const contribData = await mobileApi.user.getContributions();
@@ -98,6 +118,86 @@ export default function ProfileScreen() {
     } finally {
       setLoading(false);
       setRefreshing(false);
+    }
+  };
+
+  const handlePickDocument = async () => {
+    try {
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission Required', 'We need access to your gallery to upload verification documents.');
+        return;
+      }
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsEditing: false,
+        quality: 0.85,
+      });
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        const asset = result.assets[0];
+        setVerificationDocFile({
+          uri: asset.uri,
+          name: asset.fileName || `doc_${Date.now()}.jpg`,
+          mimeType: asset.mimeType || 'image/jpeg',
+        });
+      }
+    } catch (err: any) {
+      console.error('Pick document error:', err);
+      Alert.alert('Error', 'Could not open document picker');
+    }
+  };
+
+  const handleSubmitVerification = async () => {
+    setVerificationError('');
+    if (!verificationNotes.trim() && !verificationDocFile && !verificationSourceUrl.trim()) {
+      setVerificationError('Please provide document details, a file, or an official link.');
+      return;
+    }
+
+    if (!user?.athleteProfile?.id) {
+      setVerificationError('Athlete profile not found.');
+      return;
+    }
+
+    setSubmittingVerification(true);
+    try {
+      const claimRes = await mobileApi.verification.submitClaim({
+        entityType: 'AthleteProfile',
+        entityId: user.athleteProfile.id,
+        category: verificationCategory,
+        notes: verificationNotes.trim() || undefined,
+      });
+
+      const verificationId = claimRes?.verification?.id;
+
+      if (verificationId && verificationDocFile) {
+        await mobileApi.verification.uploadEvidenceFile(
+          verificationId,
+          verificationDocFile.uri,
+          verificationDocFile.mimeType,
+          verificationDocFile.name
+        );
+      }
+
+      Alert.alert(
+        'Verification Submitted!',
+        'Your credentials have been securely transmitted to the SportSphere Admin Review Queue. Your status is now "IN REVIEW". An admin will verify your claim shortly.',
+        [{
+          text: 'OK',
+          onPress: () => {
+            setIsVerificationModalOpen(false);
+            setVerificationNotes('');
+            setVerificationDocFile(null);
+            setVerificationSourceUrl('');
+            loadProfileData();
+          }
+        }]
+      );
+    } catch (err: any) {
+      console.error('Submit verification error:', err);
+      setVerificationError(err.response?.data?.error || err.message || 'Failed to submit verification');
+    } finally {
+      setSubmittingVerification(false);
     }
   };
 
@@ -452,6 +552,112 @@ export default function ProfileScreen() {
         </View>
       )}
 
+      {/* ─── ATHLETE VERIFICATION CENTER ─── */}
+      {isAthlete && user?.athleteProfile && (
+        <View style={s.verificationCard}>
+          <View style={s.verificationCardHeader}>
+            <View style={s.verificationCardIconWrap}>
+              <Ionicons 
+                name={
+                  user.athleteProfile.identityStatus === 'VERIFIED' ? 'shield-checkmark' :
+                  user.athleteProfile.identityStatus === 'PENDING_REVIEW' ? 'time' :
+                  user.athleteProfile.identityStatus === 'NEEDS_CORRECTION' ? 'alert-circle' :
+                  'shield-outline'
+                } 
+                size={22} 
+                color={
+                  user.athleteProfile.identityStatus === 'VERIFIED' ? '#059669' :
+                  user.athleteProfile.identityStatus === 'PENDING_REVIEW' ? '#D97706' :
+                  user.athleteProfile.identityStatus === 'NEEDS_CORRECTION' ? '#DC2626' :
+                  PRIMARY
+                } 
+              />
+            </View>
+            <View style={{ flex: 1, marginLeft: 10 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                <Text style={s.verificationCardTitle}>Verification Shield</Text>
+                <View style={[
+                  s.statusPill,
+                  user.athleteProfile.identityStatus === 'VERIFIED' ? s.statusPillVerified :
+                  user.athleteProfile.identityStatus === 'PENDING_REVIEW' ? s.statusPillPending :
+                  user.athleteProfile.identityStatus === 'NEEDS_CORRECTION' ? s.statusPillCorrection :
+                  s.statusPillUnverified
+                ]}>
+                  <Text style={[
+                    s.statusPillText,
+                    user.athleteProfile.identityStatus === 'VERIFIED' ? s.statusPillTextVerified :
+                    user.athleteProfile.identityStatus === 'PENDING_REVIEW' ? s.statusPillTextPending :
+                    user.athleteProfile.identityStatus === 'NEEDS_CORRECTION' ? s.statusPillTextCorrection :
+                    s.statusPillTextUnverified
+                  ]}>
+                    {user.athleteProfile.identityStatus === 'VERIFIED' ? 'VERIFIED' :
+                     user.athleteProfile.identityStatus === 'PENDING_REVIEW' ? 'IN REVIEW' :
+                     user.athleteProfile.identityStatus === 'NEEDS_CORRECTION' ? 'ACTION REQ.' :
+                     'UNVERIFIED'}
+                  </Text>
+                </View>
+              </View>
+              <Text style={s.verificationCardSub}>
+                {user.athleteProfile.identityStatus === 'VERIFIED' 
+                  ? 'Your identity and credentials have been verified by SportSphere.'
+                  : user.athleteProfile.identityStatus === 'PENDING_REVIEW'
+                  ? 'Your documents have been submitted and are in the Admin Review Queue.'
+                  : user.athleteProfile.identityStatus === 'NEEDS_CORRECTION'
+                  ? 'Admin requested updates. Please review notes and resubmit documents.'
+                  : 'Submit official government ID or federation license to earn the verified badge.'}
+              </Text>
+            </View>
+          </View>
+
+          {user.athleteProfile.publicVerificationSummary ? (
+            <View style={s.verificationSummaryBadge}>
+              <Ionicons name="checkmark-done" size={14} color="#059669" style={{ marginRight: 6 }} />
+              <Text style={s.verificationSummaryText}>{user.athleteProfile.publicVerificationSummary}</Text>
+            </View>
+          ) : null}
+
+          <TouchableOpacity
+            style={[
+              s.verificationActionBtn,
+              user.athleteProfile.identityStatus === 'VERIFIED' ? s.verificationActionBtnVerified :
+              user.athleteProfile.identityStatus === 'PENDING_REVIEW' ? s.verificationActionBtnPending :
+              s.verificationActionBtnDefault
+            ]}
+            onPress={() => {
+              setVerificationCategory('IDENTITY');
+              setVerificationNotes('');
+              setVerificationDocFile(null);
+              setVerificationError('');
+              setIsVerificationModalOpen(true);
+            }}
+            activeOpacity={0.85}
+          >
+            <Ionicons 
+              name={
+                user.athleteProfile.identityStatus === 'VERIFIED' ? 'add-circle-outline' :
+                user.athleteProfile.identityStatus === 'PENDING_REVIEW' ? 'document-text-outline' :
+                'shield-checkmark-outline'
+              } 
+              size={16} 
+              color={user.athleteProfile.identityStatus === 'PENDING_REVIEW' ? '#92400E' : '#FFFFFF'} 
+              style={{ marginRight: 6 }} 
+            />
+            <Text style={[
+              s.verificationActionBtnText,
+              user.athleteProfile.identityStatus === 'PENDING_REVIEW' ? { color: '#92400E' } : { color: '#FFFFFF' }
+            ]}>
+              {user.athleteProfile.identityStatus === 'VERIFIED' 
+                ? 'Submit Additional Credential' 
+                : user.athleteProfile.identityStatus === 'PENDING_REVIEW'
+                ? 'Update Verification Request'
+                : user.athleteProfile.identityStatus === 'NEEDS_CORRECTION'
+                ? 'Resubmit Corrected Evidence'
+                : 'Request Verification Now'}
+            </Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
       {/* ─── CONTRIBUTOR STATS & IMPACT (Non-Athlete) ─── */}
       {!isAthlete && (
         <View style={s.section}>
@@ -764,6 +970,147 @@ export default function ProfileScreen() {
                   <ActivityIndicator color="#fff" size="small" />
                 ) : (
                   <Text style={s.modalSaveBtnText}>SAVE CHANGES</Text>
+                )}
+              </TouchableOpacity>
+              <View style={{ height: 24 }} />
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      {/* ─── VERIFICATION SUBMISSION MODAL ─── */}
+      <Modal
+        visible={isVerificationModalOpen}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setIsVerificationModalOpen(false)}
+      >
+        <View style={s.modalOverlay}>
+          <View style={[s.modalContainer, { maxHeight: '90%' }]}>
+            <View style={s.modalHeader}>
+              <View>
+                <Text style={s.modalTitle}>Verification Request</Text>
+                <Text style={s.modalSubtitle}>
+                  Submit official credentials to SportSphere Admin Queue
+                </Text>
+              </View>
+              <TouchableOpacity
+                onPress={() => setIsVerificationModalOpen(false)}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              >
+                <Ionicons name="close" size={24} color={TEXT_DIM} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView style={s.modalScroll} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+              {verificationError ? (
+                <View style={s.modalErrorBox}>
+                  <Text style={s.modalErrorText}>⚠ {verificationError}</Text>
+                </View>
+              ) : null}
+
+              {/* Category Picker */}
+              <View style={s.modalField}>
+                <Text style={s.modalLabel}>CLAIM CATEGORY</Text>
+                <View style={s.categoryPillRow}>
+                  {[
+                    { key: 'IDENTITY', label: '🪪 Identity ID' },
+                    { key: 'ATHLETE_AFFILIATION', label: '🏛️ Affiliation' },
+                    { key: 'ACHIEVEMENT', label: '🏆 Achievement' },
+                  ].map((cat) => (
+                    <TouchableOpacity
+                      key={cat.key}
+                      style={[
+                        s.categoryChoiceBtn,
+                        verificationCategory === cat.key && s.categoryChoiceBtnActive
+                      ]}
+                      onPress={() => setVerificationCategory(cat.key as any)}
+                      activeOpacity={0.8}
+                    >
+                      <Text style={[
+                        s.categoryChoiceText,
+                        verificationCategory === cat.key && s.categoryChoiceTextActive
+                      ]}>
+                        {cat.label}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+
+              {/* Claim Details / Document Notes */}
+              <View style={s.modalField}>
+                <Text style={s.modalLabel}>CREDENTIAL DETAILS & NOTES *</Text>
+                <TextInput
+                  style={[s.modalInput, { height: 75, textAlignVertical: 'top' }]}
+                  value={verificationNotes}
+                  onChangeText={setVerificationNotes}
+                  placeholder="e.g. Government ID card or State Athletics Association License #MH-2024-8901. Issued by Athletics Federation of India."
+                  placeholderTextColor={TEXT_FAINT}
+                  multiline
+                />
+              </View>
+
+              {/* Document Photo Upload */}
+              <View style={s.modalField}>
+                <Text style={s.modalLabel}>DOCUMENT EVIDENCE (PHOTO / SCAN)</Text>
+                <TouchableOpacity
+                  style={s.docPickerBtn}
+                  onPress={handlePickDocument}
+                  activeOpacity={0.8}
+                >
+                  <Ionicons name="cloud-upload-outline" size={22} color={PRIMARY} />
+                  <View style={{ flex: 1, marginLeft: 12 }}>
+                    <Text style={s.docPickerTitle} numberOfLines={1}>
+                      {verificationDocFile ? verificationDocFile.name : 'Select ID or Certificate Photo'}
+                    </Text>
+                    <Text style={s.docPickerSub}>
+                      {verificationDocFile ? 'Tap to change selected file' : 'PNG, JPEG up to 10MB'}
+                    </Text>
+                  </View>
+                  {verificationDocFile ? (
+                    <TouchableOpacity 
+                      onPress={(e) => { e.stopPropagation(); setVerificationDocFile(null); }}
+                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    >
+                      <Ionicons name="trash-outline" size={18} color={ERROR_RED} />
+                    </TouchableOpacity>
+                  ) : null}
+                </TouchableOpacity>
+              </View>
+
+              {/* Optional URL */}
+              <View style={s.modalField}>
+                <Text style={s.modalLabel}>OFFICIAL VERIFICATION LINK (OPTIONAL)</Text>
+                <TextInput
+                  style={s.modalInput}
+                  value={verificationSourceUrl}
+                  onChangeText={setVerificationSourceUrl}
+                  placeholder="e.g. https://athleticsindia.org/athlete-results/..."
+                  placeholderTextColor={TEXT_FAINT}
+                  autoCapitalize="none"
+                />
+              </View>
+
+              {/* Security Privacy Notice */}
+              <View style={s.securityNoticeBox}>
+                <Ionicons name="lock-closed" size={16} color="#059669" style={{ marginRight: 8 }} />
+                <Text style={s.securityNoticeText}>
+                  Your verification documents are stored securely in encrypted private storage and accessed strictly by authorized SportSphere administrators.
+                </Text>
+              </View>
+
+              {/* Submit Button */}
+              <TouchableOpacity
+                style={[s.modalSaveBtn, submittingVerification && { opacity: 0.7 }]}
+                onPress={handleSubmitVerification}
+                disabled={submittingVerification}
+                activeOpacity={0.85}
+              >
+                {submittingVerification ? (
+                  <ActivityIndicator color="#fff" size="small" />
+                ) : (
+                  <Text style={s.modalSaveBtnText}>TRANSMIT TO ADMIN QUEUE</Text>
                 )}
               </TouchableOpacity>
               <View style={{ height: 24 }} />
@@ -1379,5 +1726,181 @@ const s = StyleSheet.create({
     color: SUCCESS_GREEN,
     fontSize: 12,
     fontWeight: '600',
+  },
+
+  // ── Verification Card ──
+  verificationCard: {
+    backgroundColor: CARD_BG,
+    borderRadius: 20,
+    marginHorizontal: 16,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: BORDER,
+    marginBottom: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 6,
+    elevation: 2,
+  },
+  verificationCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginBottom: 12,
+  },
+  verificationCardIconWrap: {
+    width: 42,
+    height: 42,
+    borderRadius: 12,
+    backgroundColor: PRIMARY_LIGHT,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  verificationCardTitle: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: TEXT_MAIN,
+  },
+  verificationCardSub: {
+    fontSize: 12.5,
+    color: TEXT_DIM,
+    marginTop: 4,
+    lineHeight: 17,
+  },
+  statusPill: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+  },
+  statusPillVerified: {
+    backgroundColor: '#DCFCE7',
+  },
+  statusPillPending: {
+    backgroundColor: '#FEF3C7',
+  },
+  statusPillCorrection: {
+    backgroundColor: '#FEE2E2',
+  },
+  statusPillUnverified: {
+    backgroundColor: '#F3F4F6',
+  },
+  statusPillText: {
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+  },
+  statusPillTextVerified: {
+    color: '#15803D',
+  },
+  statusPillTextPending: {
+    color: '#B45309',
+  },
+  statusPillTextCorrection: {
+    color: '#B91C1C',
+  },
+  statusPillTextUnverified: {
+    color: '#6B7280',
+  },
+  verificationSummaryBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F0FDF4',
+    borderWidth: 1,
+    borderColor: '#BBF7D0',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 10,
+    marginBottom: 12,
+  },
+  verificationSummaryText: {
+    fontSize: 12,
+    color: '#15803D',
+    fontWeight: '700',
+  },
+  verificationActionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 11,
+    borderRadius: 12,
+  },
+  verificationActionBtnDefault: {
+    backgroundColor: PRIMARY,
+  },
+  verificationActionBtnPending: {
+    backgroundColor: '#FEF3C7',
+    borderWidth: 1,
+    borderColor: '#FDE68A',
+  },
+  verificationActionBtnVerified: {
+    backgroundColor: '#059669',
+  },
+  verificationActionBtnText: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#FFFFFF',
+  },
+  categoryPillRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 4,
+  },
+  categoryChoiceBtn: {
+    flex: 1,
+    paddingVertical: 9,
+    paddingHorizontal: 8,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: BORDER,
+    backgroundColor: '#F9FAFB',
+    alignItems: 'center',
+  },
+  categoryChoiceBtnActive: {
+    borderColor: PRIMARY,
+    backgroundColor: PRIMARY_LIGHT,
+  },
+  categoryChoiceText: {
+    fontSize: 11.5,
+    fontWeight: '700',
+    color: TEXT_DIM,
+  },
+  categoryChoiceTextActive: {
+    color: PRIMARY,
+  },
+  docPickerBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: '#D1D5DB',
+    borderStyle: 'dashed',
+    backgroundColor: '#F9FAFB',
+  },
+  docPickerTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: TEXT_MAIN,
+  },
+  docPickerSub: {
+    fontSize: 11,
+    color: TEXT_FAINT,
+    marginTop: 2,
+  },
+  securityNoticeBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F0FDF4',
+    borderWidth: 1,
+    borderColor: '#DCFCE7',
+    borderRadius: 10,
+    padding: 10,
+    marginBottom: 14,
+  },
+  securityNoticeText: {
+    flex: 1,
+    fontSize: 11,
+    color: '#166534',
+    lineHeight: 15,
   },
 });

@@ -97,7 +97,7 @@ export default function CampaignCard({ campaign }: CampaignCardProps) {
               </View>
             </View>
             <Text style={styles.athleteDiscipline} numberOfLines={1}>
-              {athlete?.discipline || athlete?.headline || 'Verified Athlete'}
+              {athlete?.discipline || athlete?.headline || 'Athlete'}
             </Text>
           </View>
         </TouchableOpacity>
