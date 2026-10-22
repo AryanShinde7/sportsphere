@@ -37,7 +37,9 @@ export interface AuthenticatedRequest extends Request {
  */
 export const authenticateToken = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
   const authHeader = req.headers['authorization'];
-  const token = authHeader && authHeader.split(' ')[1];
+  const headerToken = authHeader && authHeader.split(' ')[1];
+  const queryToken = typeof req.query?.token === 'string' ? req.query.token : undefined;
+  const token = headerToken || queryToken;
 
   if (!token) {
     return res.status(401).json({ error: 'Access denied: No token provided' });
@@ -46,7 +48,7 @@ export const authenticateToken = async (req: AuthenticatedRequest, res: Response
   try {
     const decoded: any = jwt.verify(token, JWT_SECRET);
     if (!decoded || !decoded.id) {
-      return res.status(403).json({ error: 'Invalid token payload' });
+      return res.status(401).json({ error: 'Invalid token payload' });
     }
 
     const dbUser = await prisma.user.findUnique({
@@ -72,7 +74,7 @@ export const authenticateToken = async (req: AuthenticatedRequest, res: Response
     req.user = dbUser;
     next();
   } catch (err: any) {
-    return res.status(403).json({ error: 'Invalid or expired token' });
+    return res.status(401).json({ error: 'Invalid or expired token' });
   }
 };
 
@@ -81,7 +83,9 @@ export const authenticateToken = async (req: AuthenticatedRequest, res: Response
  */
 export const optionalAuthenticateToken = async (req: AuthenticatedRequest, _res: Response, next: NextFunction) => {
   const authHeader = req.headers['authorization'];
-  const token = authHeader && authHeader.split(' ')[1];
+  const headerToken = authHeader && authHeader.split(' ')[1];
+  const queryToken = typeof req.query?.token === 'string' ? req.query.token : undefined;
+  const token = headerToken || queryToken;
 
   if (!token) {
     req.user = null;

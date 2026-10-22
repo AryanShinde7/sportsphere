@@ -95,6 +95,9 @@ function AthleteCard({ item }: { item: any }) {
   const isVerified = item.verifications?.some(
     (v: any) => v.category === 'IDENTITY' && v.status === 'VERIFIED'
   );
+  const isPending = item.verifications?.some(
+    (v: any) => v.category === 'IDENTITY' && v.status === 'PENDING_REVIEW'
+  );
 
   const heroUrl   = getHeroUrl(item);
   const avatarUrl = getAvatarUrl(item);
@@ -134,12 +137,17 @@ function AthleteCard({ item }: { item: any }) {
           <View style={styles.sportChip}>
             <Text style={styles.sportChipText}>{icon}  {item.sport?.name}</Text>
           </View>
-          {isVerified && (
+          {isVerified ? (
             <View style={styles.verifiedChip}>
               <Ionicons name="checkmark-circle" size={12} color="#059669" style={{ marginRight: 3 }} />
               <Text style={styles.verifiedChipText}>VERIFIED</Text>
             </View>
-          )}
+          ) : isPending ? (
+            <View style={[styles.verifiedChip, { backgroundColor: '#FEF3C7', borderColor: '#F59E0B' }]}>
+              <Ionicons name="time-outline" size={12} color="#D97706" style={{ marginRight: 3 }} />
+              <Text style={[styles.verifiedChipText, { color: '#B45309' }]}>IN REVIEW</Text>
+            </View>
+          ) : null}
         </View>
 
         <View style={styles.heroOverlay}>

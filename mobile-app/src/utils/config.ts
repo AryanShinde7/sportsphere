@@ -397,4 +397,46 @@ export const mobileApi = {
       return res.data;
     },
   },
+
+  verification: {
+    getMyVerifications: async () => {
+      const res = await apiClient.get('/verifications/me');
+      return res.data;
+    },
+    submitClaim: async (data: { entityType: string; entityId: number; category: string; notes?: string }) => {
+      const res = await apiClient.post('/verifications', data);
+      return res.data;
+    },
+    uploadEvidence: async (verificationId: number, formData: FormData) => {
+      const token = await getAuthToken();
+      const res = await axios.post(`${API_URL}/verifications/${verificationId}/evidence`, formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+      });
+      return res.data;
+    },
+    uploadEvidenceFile: async (verificationId: number, fileUri: string, mimeType?: string, fileName?: string) => {
+      const formData = new FormData();
+      const ext = (fileUri.split('.').pop() || 'jpg').split('?')[0].toLowerCase();
+      const finalName = fileName || `evidence_${Date.now()}.${ext}`;
+      const type = mimeType || (ext === 'pdf' ? 'application/pdf' : `image/${ext === 'png' ? 'png' : 'jpeg'}`);
+
+      formData.append('file', {
+        uri: fileUri,
+        name: finalName,
+        type,
+      } as any);
+
+      const token = await getAuthToken();
+      const res = await axios.post(`${API_URL}/verifications/${verificationId}/evidence`, formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+      });
+      return res.data;
+    },
+  },
 };

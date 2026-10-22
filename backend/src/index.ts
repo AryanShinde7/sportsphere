@@ -479,6 +479,17 @@ app.get('/api/auth/me', authenticateToken, async (req: any, res) => {
     });
     if (!user) return res.status(404).json({ error: 'User not found' });
     const { passwordHash, ...safeUser } = user;
+    if (safeUser.athleteProfile) {
+      const identityVerif = await prisma.verification.findFirst({
+        where: {
+          entityType: 'AthleteProfile',
+          entityId: safeUser.athleteProfile.id,
+          category: 'IDENTITY'
+        },
+        orderBy: { updatedAt: 'desc' }
+      });
+      (safeUser as any).athleteProfile.identityStatus = identityVerif?.status || (safeUser.athleteProfile.publicVerificationSummary ? 'VERIFIED' : 'NOT_SUBMITTED');
+    }
     res.json(safeUser);
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch user' });
@@ -895,7 +906,10 @@ app.get('/api/athletes', optionalAuthenticateToken, async (req: any, res) => {
         ? rawVerifications
         : rawVerifications.map(sanitizeVerificationForPublic);
 
-      return { ...athlete, verifications };
+      const identityVerif = profileVerifications.find((v: any) => v.category === 'IDENTITY');
+      const identityStatus = identityVerif?.status || (athlete.publicVerificationSummary ? 'VERIFIED' : 'NOT_SUBMITTED');
+
+      return { ...athlete, identityStatus, verifications };
     }));
 
     // Apply verificationStatus filter after hydration
@@ -975,8 +989,12 @@ app.get('/api/athletes/:id', optionalAuthenticateToken, async (req: any, res) =>
       ? rawVerifications
       : rawVerifications.map(sanitizeVerificationForPublic);
 
+    const identityVerif = profileVerifications.find((v: any) => v.category === 'IDENTITY');
+    const identityStatus = identityVerif?.status || (athlete.publicVerificationSummary ? 'VERIFIED' : 'NOT_SUBMITTED');
+
     res.json({
       ...athlete,
+      identityStatus,
       supportRequests: filteredSupportRequests,
       verifications
     });
@@ -2481,6 +2499,22 @@ app.post('/api/admin/verifications/:id/approve', authenticateToken, requireAdmin
         });
       }
 
+      // If this is an AthleteProfile verification (Identity or Affiliation), update summary
+      if (verification.entityType === 'AthleteProfile') {
+        const ap = await tx.athleteProfile.findUnique({ where: { id: verification.entityId } });
+        if (ap) {
+          const currentSummary = ap.publicVerificationSummary || '';
+          const tag = verification.category === 'IDENTITY' ? 'Identity ✓' : (verification.category === 'ATHLETE_AFFILIATION' ? 'Affiliation ✓' : 'Verified ✓');
+          const newSummary = currentSummary.includes(tag) 
+            ? currentSummary 
+            : (currentSummary ? `${currentSummary} • ${tag}` : tag);
+          await tx.athleteProfile.update({
+            where: { id: verification.entityId },
+            data: { publicVerificationSummary: newSummary }
+          });
+        }
+      }
+
       await tx.auditLog.create({
         data: {
           userId: req.user.id,
@@ -2560,6 +2594,13 @@ app.post('/api/admin/verifications/:id/reject', authenticateToken, requireAdmin,
           data: {
             approvalStatus: 'REJECTED'
           }
+        });
+      }
+
+      if (verification.entityType === 'AthleteProfile') {
+        await tx.athleteProfile.update({
+          where: { id: verification.entityId },
+          data: { publicVerificationSummary: null }
         });
       }
 

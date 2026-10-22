@@ -47,8 +47,13 @@ apiClient.interceptors.request.use((config) => {
 apiClient.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.response?.status === 401) {
-      console.warn('Unauthorized request from admin client, token may be expired.');
+    const status = error.response?.status;
+    if (status === 401 || status === 403) {
+      console.warn('Admin session invalid or expired (HTTP', status, ').');
+      clearAdminAuth();
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('admin-logout', { detail: { reason: 'Session expired' } }));
+      }
     }
     return Promise.reject(error);
   }

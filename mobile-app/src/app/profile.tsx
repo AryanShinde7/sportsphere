@@ -66,6 +66,16 @@ export default function ProfileScreen() {
   const [saveError, setSaveError] = useState('');
   const [saveSuccess, setSaveSuccess] = useState('');
 
+  // Verification Modal & Submission State
+  const [isVerificationModalOpen, setIsVerificationModalOpen] = useState(false);
+  const [verificationCategory, setVerificationCategory] = useState<'IDENTITY' | 'ATHLETE_AFFILIATION' | 'ACHIEVEMENT'>('IDENTITY');
+  const [verificationNotes, setVerificationNotes] = useState('');
+  const [verificationSourceUrl, setVerificationSourceUrl] = useState('');
+  const [verificationDocFile, setVerificationDocFile] = useState<{ uri: string; name: string; mimeType?: string } | null>(null);
+  const [submittingVerification, setSubmittingVerification] = useState(false);
+  const [verificationError, setVerificationError] = useState('');
+  const [verificationsList, setVerificationsList] = useState<any[]>([]);
+
   useFocusEffect(
     useCallback(() => {
       loadProfileData();
@@ -90,6 +100,16 @@ export default function ProfileScreen() {
         await Storage.setItem('userData', JSON.stringify(freshUser));
       }
 
+      // If athlete, fetch their verifications
+      if (freshUser?.role === 'ATHLETE') {
+        try {
+          const vData = await mobileApi.verification.getMyVerifications();
+          setVerificationsList(Array.isArray(vData) ? vData : (vData?.verifications || []));
+        } catch (vErr) {
+          console.warn('Could not load verifications list', vErr);
+        }
+      }
+
       // If supporter/contributor, load their contributions ledger
       if (freshUser?.role !== 'ATHLETE') {
         const contribData = await mobileApi.user.getContributions();
@@ -102,6 +122,86 @@ export default function ProfileScreen() {
     } finally {
       setLoading(false);
       setRefreshing(false);
+    }
+  };
+
+  const handlePickDocument = async () => {
+    try {
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission Required', 'We need access to your gallery to upload verification documents.');
+        return;
+      }
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsEditing: false,
+        quality: 0.85,
+      });
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        const asset = result.assets[0];
+        setVerificationDocFile({
+          uri: asset.uri,
+          name: asset.fileName || `doc_${Date.now()}.jpg`,
+          mimeType: asset.mimeType || 'image/jpeg',
+        });
+      }
+    } catch (err: any) {
+      console.error('Pick document error:', err);
+      Alert.alert('Error', 'Could not open document picker');
+    }
+  };
+
+  const handleSubmitVerification = async () => {
+    setVerificationError('');
+    if (!verificationNotes.trim() && !verificationDocFile && !verificationSourceUrl.trim()) {
+      setVerificationError('Please provide document details, a file, or an official link.');
+      return;
+    }
+
+    if (!user?.athleteProfile?.id) {
+      setVerificationError('Athlete profile not found.');
+      return;
+    }
+
+    setSubmittingVerification(true);
+    try {
+      const claimRes = await mobileApi.verification.submitClaim({
+        entityType: 'AthleteProfile',
+        entityId: user.athleteProfile.id,
+        category: verificationCategory,
+        notes: verificationNotes.trim() || undefined,
+      });
+
+      const verificationId = claimRes?.verification?.id;
+
+      if (verificationId && verificationDocFile) {
+        await mobileApi.verification.uploadEvidenceFile(
+          verificationId,
+          verificationDocFile.uri,
+          verificationDocFile.mimeType,
+          verificationDocFile.name
+        );
+      }
+
+      Alert.alert(
+        'Verification Submitted!',
+        'Your credentials have been securely transmitted to the SportSphere Admin Review Queue. Your status is now "IN REVIEW". An admin will verify your claim shortly.',
+        [{
+          text: 'OK',
+          onPress: () => {
+            setIsVerificationModalOpen(false);
+            setVerificationNotes('');
+            setVerificationDocFile(null);
+            setVerificationSourceUrl('');
+            loadProfileData();
+          }
+        }]
+      );
+    } catch (err: any) {
+      console.error('Submit verification error:', err);
+      setVerificationError(err.response?.data?.error || err.message || 'Failed to submit verification');
+    } finally {
+      setSubmittingVerification(false);
     }
   };
 
@@ -456,94 +556,6 @@ export default function ProfileScreen() {
         </View>
       )}
 
-      {/* ─── ATHLETE FUNDING CAMPAIGN HUB ─── */}
-      {isAthlete && user?.athleteProfile && (() => {
-        const activeCampaign = user.athleteProfile.supportRequests?.find((sr: any) => sr.lifecycleStatus === 'ACTIVE');
-        const raised = activeCampaign?.amountSupported || 0;
-        const target = activeCampaign?.targetAmount || 1;
-        const rawPct = Math.round((raised / target) * 100);
-        const barFill = Math.min(Math.max(rawPct, raised > 0 ? 3 : 0), 100);
-
-        return (
-          <View style={s.section}>
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-              <Text style={s.sectionTitle}>MY FUNDING CAMPAIGN</Text>
-              <TouchableOpacity
-                onPress={() => setIsFundingModalVisible(true)}
-                style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}
-                activeOpacity={0.7}
-              >
-                <Ionicons name="add-circle-outline" size={16} color={PRIMARY} />
-                <Text style={{ fontSize: 13, fontWeight: '700', color: PRIMARY }}>New Request</Text>
-              </TouchableOpacity>
-            </View>
-
-            {activeCampaign ? (
-              <View style={s.campaignCard}>
-                <View style={s.campaignCardHeader}>
-                  <View style={s.liveBadge}>
-                    <View style={s.livePulseDot} />
-                    <Text style={s.liveBadgeText}>LIVE ON FEED</Text>
-                  </View>
-                  <View style={s.campaignCatChip}>
-                    <Text style={s.campaignCatText}>{activeCampaign.category || 'EQUIPMENT'}</Text>
-                  </View>
-                </View>
-
-                <Text style={s.campaignTitle}>{activeCampaign.title}</Text>
-                {activeCampaign.description ? (
-                  <Text style={s.campaignDesc} numberOfLines={2}>{activeCampaign.description}</Text>
-                ) : null}
-
-                {/* Progress bar */}
-                <View style={s.campaignProgressMeta}>
-                  <Text style={s.campaignRaised}>{inr(raised)} raised</Text>
-                  <Text style={s.campaignGoal}>{rawPct}% of {inr(target)}</Text>
-                </View>
-                <View style={s.campaignTrack}>
-                  <View style={[s.campaignFill, { width: `${barFill}%` as any }]} />
-                </View>
-
-                <View style={{ flexDirection: 'row', gap: 10, marginTop: 14 }}>
-                  <TouchableOpacity
-                    style={[s.campaignActionBtn, { backgroundColor: '#111827' }]}
-                    onPress={() => router.push(`/athlete/${user.athleteProfile.id}`)}
-                    activeOpacity={0.8}
-                  >
-                    <Text style={s.campaignActionText}>View on Profile →</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[s.campaignActionBtn, { backgroundColor: PRIMARY }]}
-                    onPress={() => setIsFundingModalVisible(true)}
-                    activeOpacity={0.8}
-                  >
-                    <Text style={s.campaignActionText}>+ New Campaign</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-            ) : (
-              <View style={s.noCampaignCard}>
-                <View style={s.noCampaignIconWrap}>
-                  <Ionicons name="rocket-outline" size={26} color={PRIMARY} />
-                </View>
-                <Text style={s.noCampaignTitle}>Raise a Support Request</Text>
-                <Text style={s.noCampaignSub}>
-                  Publish an itemized funding request for equipment, travel, or coaching to receive verified community backing.
-                </Text>
-                <TouchableOpacity
-                  style={s.startCampaignBtn}
-                  onPress={() => setIsFundingModalVisible(true)}
-                  activeOpacity={0.85}
-                >
-                  <Ionicons name="add" size={16} color="#FFFFFF" style={{ marginRight: 6 }} />
-                  <Text style={s.startCampaignBtnText}>+ Start Funding Campaign</Text>
-                </TouchableOpacity>
-              </View>
-            )}
-          </View>
-        );
-      })()}
-
       {/* ─── CONTRIBUTOR STATS & IMPACT (Non-Athlete) ─── */}
       {!isAthlete && (
         <View style={s.section}>
@@ -863,18 +875,6 @@ export default function ProfileScreen() {
           </View>
         </View>
       </Modal>
-
-      {/* ─── ATHLETE CAMPAIGN CREATION MODAL ─── */}
-      <CreateFundingRequestModal
-        visible={isFundingModalVisible}
-        onClose={() => setIsFundingModalVisible(false)}
-        onSuccess={() => {
-          setIsFundingModalVisible(false);
-          loadProfileData();
-        }}
-        athleteName={user?.name || 'Athlete'}
-        sportName={user?.athleteProfile?.sport?.name || 'Sport'}
-      />
     </ScrollView>
   );
 }
@@ -1483,151 +1483,5 @@ const s = StyleSheet.create({
     color: SUCCESS_GREEN,
     fontSize: 12,
     fontWeight: '600',
-  },
-
-  // Athlete Campaign Section in Profile
-  campaignCard: {
-    backgroundColor: CARD_BG,
-    borderWidth: 1,
-    borderColor: BORDER,
-    borderRadius: 16,
-    padding: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 3,
-    elevation: 2,
-  },
-  campaignCardHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  liveBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    backgroundColor: '#ECFDF5',
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 6,
-  },
-  livePulseDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: '#059669',
-  },
-  liveBadgeText: {
-    fontSize: 10,
-    fontWeight: '900',
-    color: '#065F46',
-    letterSpacing: 0.5,
-  },
-  campaignCatChip: {
-    backgroundColor: PRIMARY_LIGHT,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 6,
-  },
-  campaignCatText: {
-    fontSize: 11,
-    fontWeight: '800',
-    color: PRIMARY,
-  },
-  campaignTitle: {
-    fontSize: 15,
-    fontWeight: '800',
-    color: TEXT_MAIN,
-    marginBottom: 4,
-  },
-  campaignDesc: {
-    fontSize: 12.5,
-    color: TEXT_DIM,
-    lineHeight: 18,
-    marginBottom: 10,
-  },
-  campaignProgressMeta: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 6,
-  },
-  campaignRaised: {
-    fontSize: 13,
-    fontWeight: '800',
-    color: PRIMARY,
-  },
-  campaignGoal: {
-    fontSize: 12,
-    color: TEXT_DIM,
-    fontWeight: '600',
-  },
-  campaignTrack: {
-    height: 8,
-    backgroundColor: '#E5E7EB',
-    borderRadius: 4,
-    overflow: 'hidden',
-  },
-  campaignFill: {
-    height: '100%',
-    backgroundColor: PRIMARY,
-    borderRadius: 4,
-  },
-  campaignActionBtn: {
-    flex: 1,
-    paddingVertical: 10,
-    borderRadius: 10,
-    alignItems: 'center',
-  },
-  campaignActionText: {
-    color: '#FFFFFF',
-    fontSize: 12.5,
-    fontWeight: '800',
-  },
-  noCampaignCard: {
-    backgroundColor: CARD_BG,
-    borderWidth: 1.5,
-    borderColor: '#FED7AA',
-    borderStyle: 'dashed',
-    borderRadius: 16,
-    padding: 20,
-    alignItems: 'center',
-    textAlign: 'center',
-  },
-  noCampaignIconWrap: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    backgroundColor: PRIMARY_LIGHT,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 10,
-  },
-  noCampaignTitle: {
-    fontSize: 16,
-    fontWeight: '800',
-    color: TEXT_MAIN,
-    marginBottom: 4,
-  },
-  noCampaignSub: {
-    fontSize: 12.5,
-    color: TEXT_DIM,
-    textAlign: 'center',
-    lineHeight: 18,
-    marginBottom: 14,
-  },
-  startCampaignBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: PRIMARY,
-    paddingHorizontal: 18,
-    paddingVertical: 11,
-    borderRadius: 10,
-  },
-  startCampaignBtnText: {
-    color: '#FFFFFF',
-    fontSize: 13,
-    fontWeight: '800',
   },
 });
