@@ -26,6 +26,7 @@ model User {
   athleteProfile AthleteProfile?
   sponsorProfile SponsorProfile?
   supports       Support[]
+  comments       Comment[]
 }
 
 model AthleteProfile {
@@ -267,6 +268,7 @@ model Post {
   mediaUrl  String?
   createdAt DateTime       @default(now())
   cheers    Cheer[]
+  comments  Comment[]
 }
 
 // ── Phase 8A: One cheer per user per post (relation table, not integer counter) ──
@@ -274,8 +276,21 @@ model Post {
 model Cheer {
   id        Int      @id @default(autoincrement())
   postId    Int
-  post      Post     @relation(fields: [postId], references: [id])
+  post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
   userId    Int
   createdAt DateTime @default(now())
   @@unique([postId, userId])
+}
+
+// ── Phase 8B: Comments on athlete journey updates ──
+// Enabled for all authenticated users (athletes, supporters, sponsors, admins)
+model Comment {
+  id        Int      @id @default(autoincrement())
+  postId    Int
+  post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  userId    Int
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  content   String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }

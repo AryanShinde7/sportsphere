@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -10,12 +10,16 @@ import {
 import { router } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { resolveImageUrl } from '../utils/config';
+import CommentsModal from './CommentsModal';
 
 interface PostCardProps {
   post: any;
   currentUserId?: number;
+  currentUserRole?: string;
+  currentUserAvatar?: string;
   onCheerToggle: (postId: number) => void;
   onDelete?: (postId: number) => void;
+  onCommentCountChange?: (postId: number, newCount: number) => void;
 }
 
 const PRIMARY = '#E2550B';
@@ -79,12 +83,23 @@ const inr = (n: number) =>
 export default function PostCard({
   post,
   currentUserId,
+  currentUserRole,
+  currentUserAvatar,
   onCheerToggle,
   onDelete,
+  onCommentCountChange,
 }: PostCardProps) {
   const [imageFailed, setImageFailed] = useState(false);
   const [avatarFailed, setAvatarFailed] = useState(false);
   const [cheerAnimating, setCheerAnimating] = useState(false);
+  const [isCommentsOpen, setIsCommentsOpen] = useState(false);
+  const [localCommentCount, setLocalCommentCount] = useState(post.commentCount || 0);
+
+  useEffect(() => {
+    if (typeof post.commentCount === 'number') {
+      setLocalCommentCount(post.commentCount);
+    }
+  }, [post.commentCount]);
 
   const athlete = post.athlete;
   const user = athlete?.user;
@@ -198,11 +213,12 @@ export default function PostCard({
           </TouchableOpacity>
 
           <TouchableOpacity
-            style={styles.iconBtn}
-            onPress={() => router.push(`/athlete/${athlete?.id || post.athleteId}`)}
+            style={styles.commentBtn}
+            onPress={() => setIsCommentsOpen(true)}
             activeOpacity={0.7}
           >
-            <Ionicons name="chatbubble-outline" size={21} color={TEXT_MAIN} />
+            <Ionicons name="chatbubble-outline" size={22} color={TEXT_MAIN} />
+            <Text style={styles.commentCountText}>{localCommentCount}</Text>
           </TouchableOpacity>
         </View>
 
@@ -232,6 +248,38 @@ export default function PostCard({
         </Text>
       </View>
 
+      {/* ── 4B. COMMENTS SNIPPET & TRIGGER ── */}
+      <View style={styles.commentsPreviewWrap}>
+        {localCommentCount > 0 ? (
+          <TouchableOpacity
+            onPress={() => setIsCommentsOpen(true)}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.viewCommentsText}>
+              View all {localCommentCount} comment{localCommentCount !== 1 ? 's' : ''}
+            </Text>
+          </TouchableOpacity>
+        ) : (
+          <TouchableOpacity
+            onPress={() => setIsCommentsOpen(true)}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.addCommentPlaceholder}>Add a comment...</Text>
+          </TouchableOpacity>
+        )}
+
+        {post.recentComments && post.recentComments.length > 0 && (
+          <View style={styles.recentCommentSnippet}>
+            <Text style={styles.recentCommentSnippetText} numberOfLines={1}>
+              <Text style={styles.recentCommentAuthor}>
+                {post.recentComments[post.recentComments.length - 1]?.user?.name?.split(' ')[0]}:{' '}
+              </Text>
+              {post.recentComments[post.recentComments.length - 1]?.content}
+            </Text>
+          </View>
+        )}
+      </View>
+
       {/* ── 5. ATTACHED CAMPAIGN CARD (Connects social journey directly to funding!) ── */}
       {activeCampaign ? (
         <TouchableOpacity
@@ -259,6 +307,25 @@ export default function PostCard({
           </View>
         </TouchableOpacity>
       ) : null}
+
+      {/* Comments Modal Bottom Sheet */}
+      <CommentsModal
+        visible={isCommentsOpen}
+        onClose={() => setIsCommentsOpen(false)}
+        postId={post.id}
+        postContent={post.content}
+        athleteName={athleteName}
+        postAthleteUserId={user?.id}
+        currentUserId={currentUserId}
+        currentUserRole={currentUserRole}
+        currentUserAvatar={currentUserAvatar}
+        onCommentCountChange={(pId, count) => {
+          setLocalCommentCount(count);
+          if (onCommentCountChange) {
+            onCommentCountChange(pId, count);
+          }
+        }}
+      />
     </View>
   );
 }
@@ -379,6 +446,49 @@ const styles = StyleSheet.create({
   },
   iconBtn: {
     padding: 2,
+  },
+  commentBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    padding: 2,
+  },
+  commentCountText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: TEXT_MAIN,
+  },
+  commentsPreviewWrap: {
+    paddingHorizontal: 14,
+    paddingBottom: 10,
+    marginTop: -4,
+  },
+  viewCommentsText: {
+    fontSize: 12.5,
+    fontWeight: '600',
+    color: TEXT_FAINT,
+    marginBottom: 4,
+  },
+  addCommentPlaceholder: {
+    fontSize: 12.5,
+    color: TEXT_FAINT,
+    fontStyle: 'italic',
+  },
+  recentCommentSnippet: {
+    marginTop: 2,
+    backgroundColor: '#F9FAFB',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 8,
+  },
+  recentCommentSnippetText: {
+    fontSize: 12,
+    color: TEXT_DIM,
+    lineHeight: 16,
+  },
+  recentCommentAuthor: {
+    fontWeight: '800',
+    color: TEXT_MAIN,
   },
   backCampaignChip: {
     flexDirection: 'row',

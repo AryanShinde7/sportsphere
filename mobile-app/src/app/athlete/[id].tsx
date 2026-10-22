@@ -90,6 +90,13 @@ export default function AthleteProfileScreen() {
     useCallback(() => {
       fetchAthlete();
       loadCurrentUser();
+
+      // Real-time polling for live funding campaign updates across all users
+      const interval = setInterval(() => {
+        fetchAthlete(true);
+      }, 3500);
+
+      return () => clearInterval(interval);
     }, [id])
   );
 
@@ -244,14 +251,15 @@ export default function AthleteProfileScreen() {
     );
   };
 
-  const fetchAthlete = async () => {
+  const fetchAthlete = async (silent = false) => {
     try {
       const data = await mobileApi.athletes.getById(id as string);
       setAthlete(data);
     } catch (err) {
       console.error('Athlete detail error:', err);
+    } finally {
+      if (!silent) setLoading(false);
     }
-    setLoading(false);
   };
 
   const handleSponsorSubmit = async () => {
@@ -316,9 +324,10 @@ export default function AthleteProfileScreen() {
   const color    = getColor(athlete.user?.name || 'Athlete');
   const initials = getInitials(athlete.user?.name || 'Athlete');
 
-  const pct = activeRequest
-    ? Math.min(Math.round((activeRequest.amountSupported / activeRequest.targetAmount) * 100), 100)
+  const rawPct = activeRequest && activeRequest.targetAmount > 0
+    ? Math.round((activeRequest.amountSupported / activeRequest.targetAmount) * 100)
     : 0;
+  const barFill = Math.min(Math.max(rawPct, activeRequest && activeRequest.amountSupported > 0 ? 3 : 0), 100);
 
   return (
     <ScrollView
@@ -552,10 +561,10 @@ export default function AthleteProfileScreen() {
             <View style={styles.progressWrap}>
               <View style={styles.progressMeta}>
                 <Text style={styles.progressRaised}>{inr(activeRequest.amountSupported)} raised</Text>
-                <Text style={styles.progressPct}>{pct}%</Text>
+                <Text style={styles.progressPct}>{rawPct}%</Text>
               </View>
               <View style={styles.progressTrack}>
-                <View style={[styles.progressFill, { width: `${pct}%` as any }]} />
+                <View style={[styles.progressFill, { width: `${barFill}%` as any }]} />
               </View>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 4 }}>
                 <Text style={styles.progressGoal}>Goal: {inr(activeRequest.targetAmount)}</Text>

@@ -166,7 +166,252 @@ function StatCard({ icon, label, value, color, delay = 0, onClick }: {
 }
 
 /* ══════════════════════════════════════
-   MAIN DASHBOARD COMPONENT
+   VERIFICATION ITEM
+══════════════════════════════════════ */
+function VerificationItem({
+  item,
+  onDecision,
+  actionLoading,
+}: {
+  item: any;
+  onDecision: (id: number, d: 'approve' | 'reject') => Promise<void>;
+  actionLoading?: 'approve' | 'reject' | null;
+}) {
+  const name =
+    item.athleteName ||
+    item.athlete?.user?.name ||
+    item.entity?.athlete?.user?.name ||
+    item.entity?.user?.name ||
+    'Unknown Athlete';
+  const color = getAvatarColor(name);
+  const sport =
+    item.entity?.athlete?.discipline ||
+    item.entity?.discipline ||
+    item.athlete?.sport?.name ||
+    item.category ||
+    'Athlete';
+  const title =
+    item.title ||
+    item.entity?.title ||
+    item.entity?.description ||
+    `${item.category || 'Item'} Verification`;
+
+  const isRejecting = actionLoading === 'reject';
+  const isApproving = actionLoading === 'approve';
+  const isPendingAction = isRejecting || isApproving;
+
+  return (
+    <div className="list-item animate-fade-in">
+      <div className="avatar" style={{ background: color }}>
+        {getInitials(name)}
+      </div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <p style={{ fontWeight: 700, fontSize: '0.875rem', marginBottom: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+          {title}
+        </p>
+        <p style={{ fontSize: '0.75rem', color: 'var(--muted-foreground)' }}>
+          {name} · {sport}
+        </p>
+      </div>
+      <div style={{ display: 'flex', gap: 8, flexShrink: 0, alignItems: 'center' }}>
+        <button
+          id={`reject-btn-${item.id}`}
+          className="btn btn-sm btn-danger"
+          onClick={() => onDecision(item.id, 'reject')}
+          disabled={isPendingAction}
+          style={{
+            fontStyle: 'normal',
+            padding: '6px 12px',
+            opacity: isPendingAction ? 0.6 : 1,
+            cursor: isPendingAction ? 'not-allowed' : 'pointer',
+          }}
+        >
+          {isRejecting ? (
+            <div className="spinner" style={{ width: 12, height: 12, borderWidth: 2 }} />
+          ) : (
+            <XCircle size={13} />
+          )}
+          {isRejecting ? 'Rejecting...' : 'Reject'}
+        </button>
+        <button
+          id={`approve-btn-${item.id}`}
+          className="btn btn-sm btn-success"
+          onClick={() => onDecision(item.id, 'approve')}
+          disabled={isPendingAction}
+          style={{
+            fontStyle: 'normal',
+            padding: '6px 14px',
+            opacity: isPendingAction ? 0.6 : 1,
+            cursor: isPendingAction ? 'not-allowed' : 'pointer',
+          }}
+        >
+          {isApproving ? (
+            <div className="spinner" style={{ width: 12, height: 12, borderWidth: 2 }} />
+          ) : (
+            <CheckCircle size={13} />
+          )}
+          {isApproving ? 'Approving...' : 'Approve'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════
+   ATHLETE ROW (recent)
+══════════════════════════════════════ */
+function AthleteRow({ athlete, index }: { athlete: any; index: number }) {
+  const name = athlete.user?.name || 'Unknown';
+  const color = getAvatarColor(name);
+  const req = athlete.supportRequests?.[0];
+  const rawPct = req && req.targetAmount > 0
+    ? Math.round((req.amountSupported / req.targetAmount) * 100)
+    : 0;
+  const barFill = Math.min(Math.max(rawPct, req && req.amountSupported > 0 ? 3 : 0), 100);
+
+  return (
+    <div className="list-item" style={{ animationDelay: `${index * 40}ms` }}>
+      <div className="avatar" style={{ background: color, fontSize: '0.75rem' }}>
+        {getInitials(name)}
+      </div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <p style={{ fontWeight: 700, fontSize: '0.875rem', textTransform: 'uppercase', letterSpacing: '-0.02em', marginBottom: 2 }}>
+          {name}
+        </p>
+        <p style={{ fontSize: '0.6875rem', color: 'var(--muted-foreground)' }}>
+          {athlete.sport?.name} · {athlete.discipline}
+        </p>
+      </div>
+      <div style={{ textAlign: 'right', flexShrink: 0 }}>
+        {req ? (
+          <>
+            <p style={{ fontSize: '0.6875rem', fontWeight: 700, color: 'var(--primary)', marginBottom: 4 }}>
+              {rawPct}% funded
+            </p>
+            <div className="progress-bar" style={{ width: 80 }}>
+              <div className="progress-fill" style={{ width: `${barFill}%` }} />
+            </div>
+          </>
+        ) : (
+          <span className="badge badge-muted">No request</span>
+        )}
+      </div>
+      <ChevronRight size={14} color="var(--muted-foreground)" style={{ marginLeft: 8, flexShrink: 0 }} />
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════
+   SPONSORSHIP PROPOSAL ROW
+══════════════════════════════════════ */
+function SponsorshipRow({
+  item,
+  onUpdateStatus,
+  updating,
+}: {
+  item: any;
+  onUpdateStatus: (id: number, status: string) => Promise<void>;
+  updating: boolean;
+}) {
+  const sponsorName = item.sponsor?.organizationName || item.sponsor?.user?.name || 'Corporate Sponsor';
+  const sponsorEmail = item.sponsor?.user?.email;
+  const athleteName = item.athlete?.user?.name || 'Athlete';
+  const sport = item.athlete?.sport?.name || 'Sport';
+  const status = item.status || 'SUBMITTED';
+
+  const getStatusBadge = () => {
+    switch (status) {
+      case 'ACCEPTED':
+        return <span className="badge badge-success" style={{ padding: '3px 8px', fontSize: '0.6875rem' }}>Accepted</span>;
+      case 'DECLINED':
+        return <span className="badge badge-danger" style={{ padding: '3px 8px', fontSize: '0.6875rem' }}>Declined</span>;
+      case 'REVIEWING':
+        return <span className="badge badge-warning" style={{ padding: '3px 8px', fontSize: '0.6875rem' }}>Reviewing</span>;
+      default:
+        return <span className="badge badge-muted" style={{ padding: '3px 8px', fontSize: '0.6875rem' }}>Submitted</span>;
+    }
+  };
+
+  return (
+    <div className="list-item animate-fade-in" style={{ padding: '16px 20px', alignItems: 'flex-start' }}>
+      <div className="avatar" style={{ background: '#0F172A', color: '#fff', fontSize: '0.75rem', marginTop: 2 }}>
+        💼
+      </div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+          <p style={{ fontWeight: 800, fontSize: '0.9375rem', margin: 0 }}>
+            {sponsorName}
+          </p>
+          {getStatusBadge()}
+        </div>
+        <p style={{ fontSize: '0.75rem', color: 'var(--muted-foreground)', marginBottom: 6 }}>
+          Target: <strong style={{ color: 'var(--foreground)' }}>{athleteName}</strong> ({sport})
+          {sponsorEmail ? ` · Contact: ${sponsorEmail}` : ''}
+        </p>
+        <div style={{ display: 'flex', gap: 12, fontSize: '0.75rem', marginBottom: 6, flexWrap: 'wrap' }}>
+          <span style={{ color: 'var(--primary)', fontWeight: 700 }}>
+            Type: {item.supportType || 'FINANCIAL'}
+          </span>
+          {item.proposedAmount && (
+            <span style={{ fontWeight: 700 }}>
+              Amount: {item.proposedAmount}
+            </span>
+          )}
+          {item.duration && (
+            <span style={{ color: 'var(--muted-foreground)' }}>
+              Duration: {item.duration}
+            </span>
+          )}
+        </div>
+        {item.message && (
+          <p style={{ fontSize: '0.75rem', color: 'var(--muted-foreground)', fontStyle: 'italic', background: 'rgba(255,255,255,0.03)', padding: '6px 10px', borderRadius: 6, margin: 0 }}>
+            "{item.message}"
+          </p>
+        )}
+      </div>
+
+      {/* Action controls */}
+      <div style={{ display: 'flex', gap: 6, flexShrink: 0, marginTop: 4 }}>
+        {status !== 'REVIEWING' && status !== 'ACCEPTED' && (
+          <button
+            id={`review-sponsor-btn-${item.id}`}
+            className="btn btn-sm btn-secondary"
+            onClick={() => onUpdateStatus(item.id, 'REVIEWING')}
+            disabled={updating}
+            style={{ fontSize: '0.6875rem', padding: '5px 10px' }}
+          >
+            Review
+          </button>
+        )}
+        {status !== 'ACCEPTED' && (
+          <button
+            id={`accept-sponsor-btn-${item.id}`}
+            className="btn btn-sm btn-success"
+            onClick={() => onUpdateStatus(item.id, 'ACCEPTED')}
+            disabled={updating}
+            style={{ fontSize: '0.6875rem', padding: '5px 10px' }}
+          >
+            Accept
+          </button>
+        )}
+        {status !== 'DECLINED' && (
+          <button
+            id={`decline-sponsor-btn-${item.id}`}
+            className="btn btn-sm btn-danger"
+            onClick={() => onUpdateStatus(item.id, 'DECLINED')}
+            disabled={updating}
+            style={{ fontSize: '0.6875rem', padding: '5px 10px' }}
+          >
+            Decline
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════
+   DASHBOARD HOME
 ══════════════════════════════════════ */
 function Dashboard({ user, onLogout }: { user: any; onLogout: () => void }) {
   const [activeTab, setActiveTab] = useState<'overview' | 'verifications' | 'campaigns' | 'audit'>('overview');
@@ -210,7 +455,6 @@ function Dashboard({ user, onLogout }: { user: any; onLogout: () => void }) {
         adminApi.getSupportRequests(),
         adminApi.getAuditLogs({ page: 1, limit: 30 })
       ]);
-
       const [dashRes, athRes, sponRes, verifRes, campRes, auditRes] = results;
 
       if (dashRes.status === 'fulfilled') {
