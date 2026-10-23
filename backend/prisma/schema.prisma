@@ -1,6 +1,3 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -11,78 +8,73 @@ datasource db {
 }
 
 model User {
-  id           Int      @id @default(autoincrement())
-  name         String
-  email        String   @unique
-  phone        String?  @unique
+  id              Int             @id @default(autoincrement())
+  name            String
+  email           String          @unique
+  phone           String?         @unique
   passwordHash    String
-  role            String   @default("SUPPORTER") // "ATHLETE", "SUPPORTER", "SPONSOR", "ADMIN"
-  status          String   @default("ACTIVE")
+  role            String          @default("SUPPORTER")
+  status          String          @default("ACTIVE")
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
   profileImageUrl String?
   bannerImageUrl  String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-
-  athleteProfile AthleteProfile?
-  sponsorProfile SponsorProfile?
-  supports       Support[]
-  comments       Comment[]
+  athleteProfile  AthleteProfile?
+  sponsorProfile  SponsorProfile?
+  supports        Support[]
+  comments        Comment[]
 }
 
 model AthleteProfile {
-  id                        Int      @id @default(autoincrement())
-  userId                    Int      @unique
-  user                      User     @relation(fields: [userId], references: [id])
+  id                        Int                   @id @default(autoincrement())
+  userId                    Int                   @unique
   sportId                   Int?
-  sport                     Sport?   @relation(fields: [sportId], references: [id])
   discipline                String?
   city                      String?
   state                     String?
   bio                       String?
-  headline                  String?  // e.g. "National U-19 400m Gold Medalist | Target: 2028 Olympics"
   coachName                 String?
   academyName               String?
   currentGoal               String?
-  publicVerificationSummary String?  // DEPRECATED: verification now computed from Verification table. Kept for backward compat.
-  createdAt                 DateTime @default(now())
-  updatedAt                 DateTime @updatedAt
-
-  achievements         Achievement[]
-  supportRequests      SupportRequest[]
-  sponsorshipInterests SponsorshipInterest[]
-  mediaAssets          MediaAsset[]
-  milestones           CareerMilestone[]
-  posts                Post[]
+  publicVerificationSummary String?
+  createdAt                 DateTime              @default(now())
+  updatedAt                 DateTime              @updatedAt
+  headline                  String?
+  achievements              Achievement[]
+  sport                     Sport?                @relation(fields: [sportId], references: [id])
+  user                      User                  @relation(fields: [userId], references: [id])
+  milestones                CareerMilestone[]
+  mediaAssets               MediaAsset[]
+  posts                     Post[]
+  sponsorshipInterests      SponsorshipInterest[]
+  supportRequests           SupportRequest[]
 }
 
 model SponsorProfile {
-  id               Int      @id @default(autoincrement())
-  userId           Int      @unique
-  user             User     @relation(fields: [userId], references: [id])
-  organizationName String
-  organizationType String?
-  contactPerson    String?
-  preferredSports  String?
-  preferredRegions String?
-  budgetRange      String?
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
-
+  id                   Int                   @id @default(autoincrement())
+  userId               Int                   @unique
+  organizationName     String
+  organizationType     String?
+  contactPerson        String?
+  preferredSports      String?
+  preferredRegions     String?
+  budgetRange          String?
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
+  user                 User                  @relation(fields: [userId], references: [id])
   sponsorshipInterests SponsorshipInterest[]
 }
 
 model Sport {
-  id       Int      @id @default(autoincrement())
-  name     String   @unique
+  id       Int              @id @default(autoincrement())
+  name     String           @unique
   category String?
-
   athletes AthleteProfile[]
 }
 
 model Achievement {
   id                 Int            @id @default(autoincrement())
   athleteId          Int
-  athlete            AthleteProfile @relation(fields: [athleteId], references: [id])
   title              String
   competition        String?
   event              String?
@@ -90,78 +82,75 @@ model Achievement {
   score              String?
   date               String?
   evidenceFileId     String?
-  achievementLevel   String?        // DISTRICT | STATE | NATIONAL | INTERNATIONAL
-  verificationStatus String         @default("NOT_SUBMITTED") // Denormalized cache from Verification table. Full enum: NOT_SUBMITTED | PENDING_REVIEW | VERIFIED | REJECTED | NEEDS_CORRECTION | RE_VERIFICATION_REQUIRED
+  verificationStatus String         @default("NOT_SUBMITTED")
   verifiedBy         Int?
   verifiedAt         DateTime?
   createdAt          DateTime       @default(now())
   updatedAt          DateTime       @updatedAt
+  achievementLevel   String?
+  athlete            AthleteProfile @relation(fields: [athleteId], references: [id])
 }
 
 model SupportRequest {
-  id              Int            @id @default(autoincrement())
+  id              Int              @id @default(autoincrement())
   athleteId       Int
-  athlete         AthleteProfile @relation(fields: [athleteId], references: [id])
   title           String
   description     String?
   category        String
   targetAmount    Float
   deadline        DateTime?
-  approvalStatus  String         @default("DRAFT") // DRAFT, SUBMITTED, UNDER_REVIEW, APPROVED, REJECTED
-  lifecycleStatus String         @default("ACTIVE") // ACTIVE, TARGET_REACHED, FULFILLED, CLOSED
-  amountSupported Float          @default(0)
-  createdAt       DateTime       @default(now())
-  updatedAt       DateTime       @updatedAt
-
+  approvalStatus  String           @default("DRAFT")
+  lifecycleStatus String           @default("ACTIVE")
+  amountSupported Float            @default(0)
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
   budgetItems     BudgetItem[]
-  supports        Support[]
   progressUpdates ProgressUpdate[]
+  supports        Support[]
+  athlete         AthleteProfile   @relation(fields: [athleteId], references: [id])
 }
 
 model BudgetItem {
   id               Int            @id @default(autoincrement())
   supportRequestId Int
-  supportRequest   SupportRequest @relation(fields: [supportRequestId], references: [id])
   description      String
   amount           Float
   evidenceFileId   String?
   status           String         @default("PENDING")
   createdAt        DateTime       @default(now())
   updatedAt        DateTime       @updatedAt
+  supportRequest   SupportRequest @relation(fields: [supportRequestId], references: [id])
 }
 
 model Support {
   id               Int            @id @default(autoincrement())
   supportRequestId Int
-  supportRequest   SupportRequest @relation(fields: [supportRequestId], references: [id])
   supporterId      Int
-  supporter        User           @relation(fields: [supporterId], references: [id])
   amount           Float
-  transactionId    String?        // Legacy field, kept for backward compat
-  status           String         @default("INITIATED") // INITIATED, PENDING, SUCCESS, FAILED
+  transactionId    String?
+  status           String         @default("INITIATED")
   createdAt        DateTime       @default(now())
-
+  supporter        User           @relation(fields: [supporterId], references: [id])
+  supportRequest   SupportRequest @relation(fields: [supportRequestId], references: [id])
   transaction      Transaction?
 }
 
 model ProgressUpdate {
   id                 Int            @id @default(autoincrement())
   supportRequestId   Int
-  supportRequest     SupportRequest @relation(fields: [supportRequestId], references: [id])
   title              String
   description        String?
   evidenceFileId     String?
   verificationStatus String         @default("NOT_SUBMITTED")
   createdAt          DateTime       @default(now())
   updatedAt          DateTime       @updatedAt
+  supportRequest     SupportRequest @relation(fields: [supportRequestId], references: [id])
 }
 
 model SponsorshipInterest {
   id               Int            @id @default(autoincrement())
   sponsorId        Int
-  sponsor          SponsorProfile @relation(fields: [sponsorId], references: [id])
   athleteId        Int
-  athlete          AthleteProfile @relation(fields: [athleteId], references: [id])
   supportRequestId Int?
   supportType      String
   proposedAmount   String?
@@ -171,114 +160,101 @@ model SponsorshipInterest {
   status           String         @default("SUBMITTED")
   createdAt        DateTime       @default(now())
   updatedAt        DateTime       @updatedAt
+  athlete          AthleteProfile @relation(fields: [athleteId], references: [id])
+  sponsor          SponsorProfile @relation(fields: [sponsorId], references: [id])
 }
 
-// Polymorphic verification — one record per entity being verified.
-// No direct Prisma relation; resolved in application code via entityType/entityId.
 model Verification {
   id         Int                    @id @default(autoincrement())
-  entityType String                 // "AthleteProfile" | "Achievement" | "SupportRequest" | "BudgetItem"
+  entityType String
   entityId   Int
-  category   String                 // IDENTITY | ATHLETE_AFFILIATION | ACHIEVEMENT | SUPPORT_NEED | BUDGET_EVIDENCE | EXPENSE_EVIDENCE
-  status     String                 @default("NOT_SUBMITTED") // NOT_SUBMITTED | PENDING_REVIEW | VERIFIED | REJECTED | NEEDS_CORRECTION | RE_VERIFICATION_REQUIRED
+  category   String
+  status     String                 @default("NOT_SUBMITTED")
   verifiedBy Int?
   verifiedAt DateTime?
   notes      String?
   createdAt  DateTime               @default(now())
   updatedAt  DateTime               @updatedAt
-
   evidence   VerificationEvidence[]
 }
 
 model VerificationEvidence {
   id                Int          @id @default(autoincrement())
   verificationId    Int
-  verification      Verification @relation(fields: [verificationId], references: [id], onDelete: Cascade)
-  evidenceType      String       // DOCUMENT, CERTIFICATE, GOVT_ID, FEDERATION_LETTER, COMPETITION_RESULT, URL
+  evidenceType      String
   privateStorageKey String?
   sourceUrl         String?
   originalFilename  String?
   uploadedAt        DateTime     @default(now())
   documentHash      String?
+  verification      Verification @relation(fields: [verificationId], references: [id], onDelete: Cascade)
 }
 
-// Linked 1:1 to Support. Uses Razorpay vocabulary for gateway status.
-// Note: Uses gatewayOrderId/gatewayPaymentId/gatewaySignature instead of the brief's
-// single gatewayReference — intentional enhancement to match real Razorpay webhook shape.
 model Transaction {
   id               Int      @id @default(autoincrement())
   supportId        Int      @unique
-  support          Support  @relation(fields: [supportId], references: [id])
-  gatewayOrderId   String?  // mock: "order_XXXXXXXXXX"
-  gatewayPaymentId String?  // mock: "pay_XXXXXXXXXX"
-  gatewaySignature String?  // stub for HMAC verification
+  gatewayOrderId   String?
+  gatewayPaymentId String?
+  gatewaySignature String?
   amount           Float
   currency         String   @default("INR")
-  status           String   @default("CREATED") // CREATED | AUTHORIZED | CAPTURED | FAILED (Razorpay vocabulary)
-  gatewayResponse  String?  // JSON blob of full mock response
+  status           String   @default("CREATED")
+  gatewayResponse  String?
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
+  support          Support  @relation(fields: [supportId], references: [id])
 }
 
-// Audit trail for all admin mutations.
 model AuditLog {
   id         Int      @id @default(autoincrement())
   userId     Int
-  action     String   // "VERIFICATION_APPROVED", "VERIFICATION_REJECTED", "VERIFICATION_CORRECTION_REQUESTED", "SUPPORT_REQUEST_APPROVED", etc.
-  entityType String   // "Verification", "SupportRequest", "SponsorshipInterest"
+  action     String
+  entityType String
   entityId   Int
-  details    String?  // JSON with before/after or contextual notes
+  details    String?
   createdAt  DateTime @default(now())
 }
 
-// ── Phase 7A: Athlete media assets (avatars, banners, gallery) ──
-// Stored as a relation table (not a JSON blob) so assets are queryable,
-// orderable, and can be efficiently filtered by type.
 model MediaAsset {
   id        Int            @id @default(autoincrement())
   athleteId Int
-  athlete   AthleteProfile @relation(fields: [athleteId], references: [id])
-  type      String         // "AVATAR" | "BANNER" | "GALLERY"
+  type      String
   url       String
   order     Int            @default(0)
   createdAt DateTime       @default(now())
+  athlete   AthleteProfile @relation(fields: [athleteId], references: [id])
 }
 
-// ── Phase 8A: Career timeline milestones ──
 model CareerMilestone {
   id             Int            @id @default(autoincrement())
   athleteId      Int
-  athlete        AthleteProfile @relation(fields: [athleteId], references: [id])
   year           Int
   title          String
-  result         String?        // e.g. "Gold Medal — 46.8s"
-  level          String         // "DISTRICT" | "STATE" | "NATIONAL" | "INTERNATIONAL"
+  result         String?
+  level          String
   certificateUrl String?
   createdAt      DateTime       @default(now())
+  athlete        AthleteProfile @relation(fields: [athleteId], references: [id])
 }
 
-// ── Phase 8A: Athlete update posts ──
-// cheerCount is NOT stored as an integer to avoid write race conditions.
-// Cheer count is computed at query time with _count.cheers.
 model Post {
   id        Int            @id @default(autoincrement())
   athleteId Int
-  athlete   AthleteProfile @relation(fields: [athleteId], references: [id])
   content   String
   mediaUrl  String?
   createdAt DateTime       @default(now())
   cheers    Cheer[]
   comments  Comment[]
+  athlete   AthleteProfile @relation(fields: [athleteId], references: [id])
 }
 
-// ── Phase 8A: One cheer per user per post (relation table, not integer counter) ──
-// @@unique enforces the business rule at the database level.
 model Cheer {
   id        Int      @id @default(autoincrement())
   postId    Int
-  post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
   userId    Int
   createdAt DateTime @default(now())
+  post      Post     @relation(fields: [postId], references: [id])
+
   @@unique([postId, userId])
 }
 
